@@ -217,6 +217,30 @@ export default function Home() {
         >
           <BarChart3 size={18} /> Detailed Analytics
         </Link>
+
+        <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-800 text-center space-y-3 pb-4">
+          <p className="text-sm font-medium text-gray-400">
+            Developed by <a href="https://mandy9943.dev" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Mandy9943</a>
+          </p>
+          <div className="flex justify-center gap-6">
+            <a 
+              href="https://github.com/Mandy9943" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex items-center gap-1"
+            >
+              GitHub
+            </a>
+            <a 
+              href="https://mandy9943.dev" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex items-center gap-1"
+            >
+              Portfolio
+            </a>
+          </div>
+        </div>
       </footer>
     </div>
   );
