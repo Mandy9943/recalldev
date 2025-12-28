@@ -1,27 +1,17 @@
-import { MetadataRoute } from 'next'
+import { MetadataRoute } from "next";
+
+export const revalidate = 86400;
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://recalldev.mandy9943.dev'
-  
+  const baseUrl = "https://recalldev.mandy9943.dev";
+
   return [
     {
       url: baseUrl,
       lastModified: new Date(),
-      changeFrequency: 'yearly',
+      changeFrequency: "weekly",
       priority: 1,
     },
-    {
-      url: `${baseUrl}/practice`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.8,
-    },
-    {
-      url: `${baseUrl}/progress`,
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 0.5,
-    },
-  ]
+  ];
 }
 

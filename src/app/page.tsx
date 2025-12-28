@@ -1,299 +1,115 @@
-"use client";
-
-import { useInterview } from "@/context/InterviewContext";
-import { Difficulty, ProgrammingLanguage } from "@/types";
-import {
-  BarChart3,
-  BrainCircuit,
-  ChevronRight,
-  Code2,
-  Layers,
-  Play,
-  Settings2,
-} from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import Script from "next/script";
+import { HomeClient } from "./HomeClient";
 
-export default function Home() {
-  const { repository, stats, isReady } = useInterview();
-
-  const [selectedLanguage, setSelectedLanguage] =
-    useState<ProgrammingLanguage>("JavaScript");
-  const [selectedDifficulty, setSelectedDifficulty] =
-    useState<Difficulty>("Senior");
-
-  const [availableLanguages, setAvailableLanguages] = useState<
-    ProgrammingLanguage[]
-  >([]);
-  const [availableDifficulties, setAvailableDifficulties] = useState<
-    Difficulty[]
-  >([]);
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [dueCount, setDueCount] = useState(0);
-  const [newCount, setNewCount] = useState(0);
-
-  // Load available metadata (Languages & Difficulties) from ALL questions on mount
-  useEffect(() => {
-    if (!isReady) return;
-
-    const loadGlobalMetadata = async () => {
-      const allQuestions = await repository.getQuestions({});
-
-      const languages = Array.from(
-        new Set(allQuestions.map((q) => q.language))
-      ) as ProgrammingLanguage[];
-      const difficulties = Array.from(
-        new Set(allQuestions.map((q) => q.difficulty))
-      ) as Difficulty[];
-
-      setAvailableLanguages(languages.sort());
-      // Custom sort order for difficulties
-      const difficultyOrder = { Junior: 1, Mid: 2, Senior: 3, Staff: 4 };
-      setAvailableDifficulties(
-        difficulties.sort(
-          (a, b) => (difficultyOrder[a] || 0) - (difficultyOrder[b] || 0)
-        )
-      );
-
-      // Default selection safety check
-      if (languages.length > 0 && !languages.includes(selectedLanguage)) {
-        setSelectedLanguage(languages[0]);
-      }
-    };
-
-    loadGlobalMetadata();
-  }, [isReady, repository]); // Run only when repo is ready
-
-  // Load tags and due count when selection changes
-  useEffect(() => {
-    if (!isReady) return;
-
-    const loadSessionMetadata = async () => {
-      // Get questions that match current Language & Difficulty selection
-      const filtered = await repository.getQuestions({
-        languages: [selectedLanguage],
-        difficulties: [selectedDifficulty],
-      });
-
-      const tags = Array.from(new Set(filtered.flatMap((q) => q.tags)));
-      setAvailableTags(tags.sort());
-
-      const due = await repository.getDueQuestions({
-        languages: [selectedLanguage],
-        difficulties: [selectedDifficulty],
-        tags: selectedTags.length ? selectedTags : undefined,
-      });
-      setDueCount(due.length);
-
-      const unseen = await repository.getNewQuestions({
-        languages: [selectedLanguage],
-        difficulties: [selectedDifficulty],
-        tags: selectedTags.length ? selectedTags : undefined,
-      });
-      setNewCount(unseen.length);
-    };
-
-    loadSessionMetadata();
-  }, [isReady, selectedLanguage, selectedDifficulty, selectedTags, repository]);
-
-  const toggleTag = (tag: string) => {
-    setSelectedTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
+export default function HomePage() {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        name: "RecallDev",
+        url: "https://recalldev.mandy9943.dev/",
+      },
+      {
+        "@type": "Person",
+        name: "Mandy9943",
+        url: "https://mandy9943.dev",
+        sameAs: ["https://github.com/Mandy9943", "https://mandy9943.dev"],
+      },
+      {
+        "@type": "SoftwareApplication",
+        name: "RecallDev",
+        applicationCategory: "EducationalApplication",
+        operatingSystem: "Web",
+        url: "https://recalldev.mandy9943.dev/",
+        description:
+          "Master technical interviews with active recall and spaced repetition across JavaScript, TypeScript, Go, Python, and System Architecture.",
+        author: {
+          "@type": "Person",
+          name: "Mandy9943",
+          url: "https://mandy9943.dev",
+        },
+      },
+    ],
   };
 
-  const startSessionUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    params.set("lang", selectedLanguage);
-    params.set("diff", selectedDifficulty);
-    if (selectedTags.length) params.set("tags", selectedTags.join(","));
-    return `/practice?${params.toString()}`;
-  }, [selectedLanguage, selectedDifficulty, selectedTags]);
-
-  if (!isReady) return null;
-
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900 transition-colors duration-300">
-      <header className="p-6 md:p-8 border-b border-gray-100 dark:border-gray-800">
-        <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-4">
-          <BrainCircuit size={32} />
-          <span className="text-xl font-black tracking-tighter">
-            RecallDev v2
-          </span>
-        </div>
-        <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 dark:text-white leading-tight">
-          Intelligent <br />
-          <span className="text-gray-400">Interview Mastery</span>
+    <>
+      <Script
+        id="ld-json"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      <header className="p-6 md:p-10 border-b border-gray-100 dark:border-gray-800">
+        <p className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.25em]">
+          RecallDev
+        </p>
+        <h1 className="mt-3 text-3xl md:text-4xl font-extrabold text-gray-900 dark:text-white leading-tight">
+          Intelligent Interview Mastery
         </h1>
+        <p className="mt-4 text-base md:text-lg text-gray-600 dark:text-gray-300 leading-relaxed">
+          Practice technical interview questions using{" "}
+          <strong>active recall</strong> and a{" "}
+          <strong>spaced repetition</strong> review loop. Track mastery over
+          time and focus on what’s due next.
+        </p>
+
+        <div className="mt-6 flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/practice"
+            className="inline-flex items-center justify-center px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98]"
+          >
+            Start practicing
+          </Link>
+          <Link
+            href="/progress"
+            className="inline-flex items-center justify-center px-5 py-3 rounded-2xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-black transition-all active:scale-[0.98]"
+          >
+            View progress
+          </Link>
+        </div>
+
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+              Built for recall
+            </p>
+            <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              Reveal answers only after thinking, then evaluate your recall to
+              set the next review interval.
+            </p>
+          </div>
+          <div className="p-5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+              Focus on what’s due
+            </p>
+            <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              Sessions prioritize questions that are due, then backfill with new
+              ones to keep progress moving.
+            </p>
+          </div>
+          <div className="p-5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+              Multi-skill library
+            </p>
+            <p className="mt-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              JavaScript, TypeScript, Go, Python, and System Architecture — from
+              Junior to Staff.
+            </p>
+          </div>
+        </div>
+
+        <noscript>
+          <p className="mt-6 text-sm text-gray-500">
+            You can browse this landing page without JavaScript, but the
+            interactive practice experience requires JavaScript enabled.
+          </p>
+        </noscript>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
-        {/* Stats Summary */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl border border-blue-100 dark:border-blue-800/50">
-            <span className="block text-2xl font-black text-blue-600 dark:text-blue-400">
-              {stats?.totalQuestionsSeen || 0}
-            </span>
-            <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">
-              Seen
-            </span>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-2xl border border-green-100 dark:border-green-800/50">
-            <span className="block text-2xl font-black text-green-600 dark:text-green-400">
-              {stats?.masteryPercentage || 0}%
-            </span>
-            <span className="text-xs font-bold text-green-400 uppercase tracking-widest">
-              Mastery
-            </span>
-          </div>
-        </div>
-
-        {/* Configuration Section */}
-        <section className="space-y-6">
-          <div className="space-y-4">
-            <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
-              <Code2 size={16} /> Language
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {availableLanguages.length > 0 ? (
-                availableLanguages.map((lang) => (
-                  <button
-                    key={lang}
-                    onClick={() => setSelectedLanguage(lang)}
-                    className={`px-4 py-2 rounded-xl font-bold transition-all ${
-                      selectedLanguage === lang
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none"
-                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    {lang}
-                  </button>
-                ))
-              ) : (
-                <p className="text-sm text-gray-400">Loading languages...</p>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
-              <Settings2 size={16} /> Seniority
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {availableDifficulties.length > 0 ? (
-                availableDifficulties.map((diff) => (
-                  <button
-                    key={diff}
-                    onClick={() => setSelectedDifficulty(diff)}
-                    className={`px-4 py-2 rounded-xl font-bold transition-all ${
-                      selectedDifficulty === diff
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none"
-                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    {diff}
-                  </button>
-                ))
-              ) : (
-                <p className="text-sm text-gray-400">Loading levels...</p>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
-              <Layers size={16} /> Topics (Optional)
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {availableTags.length > 0 ? (
-                availableTags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => toggleTag(tag)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      selectedTags.includes(tag)
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400"
-                        : "bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                ))
-              ) : (
-                <span className="text-xs text-gray-400 italic">
-                  No topics found for this selection.
-                </span>
-              )}
-            </div>
-          </div>
-        </section>
-      </main>
-
-      <footer className="p-6 md:p-8 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
-        <Link
-          href={startSessionUrl}
-          className={`group relative flex items-center justify-between w-full p-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] ${
-            availableLanguages.length === 0
-              ? "opacity-50 pointer-events-none"
-              : ""
-          }`}
-        >
-          <div className="flex flex-col items-start">
-            <span className="flex items-center gap-2 text-lg">
-              Start Practice <Play size={20} fill="currentColor" />
-            </span>
-            <span className="text-blue-200 text-xs font-bold uppercase tracking-widest mt-1">
-              {dueCount > 0
-                ? `${dueCount} Questions Due Now`
-                : newCount > 0
-                ? `${newCount} New Questions Available`
-                : "All Caught Up"}
-            </span>
-          </div>
-          <ChevronRight className="group-hover:translate-x-1 transition-transform" />
-        </Link>
-
-        <Link
-          href="/progress"
-          className="flex items-center justify-center gap-2 w-full mt-4 p-4 text-gray-500 dark:text-gray-400 font-bold hover:text-blue-600 transition-colors"
-        >
-          <BarChart3 size={18} /> Detailed Analytics
-        </Link>
-
-        <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-800 text-center space-y-3 pb-4">
-          <p className="text-sm font-medium text-gray-400">
-            Developed by{" "}
-            <a
-              href="https://mandy9943.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              Mandy9943
-            </a>
-          </p>
-          <div className="flex justify-center gap-6">
-            <a
-              href="https://github.com/Mandy9943"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex items-center gap-1"
-            >
-              GitHub
-            </a>
-            <a
-              href="https://mandy9943.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex items-center gap-1"
-            >
-              Portfolio
-            </a>
-          </div>
-        </div>
-      </footer>
-    </div>
+      <HomeClient />
+    </>
   );
 }

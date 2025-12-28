@@ -53,6 +53,14 @@ export const metadata: Metadata = {
     siteName: "RecallDev",
     locale: "en_US",
     type: "website",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "RecallDev - Intelligent Interview Mastery",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -60,6 +68,7 @@ export const metadata: Metadata = {
     description:
       "Master technical interviews with active recall. Practice JavaScript, TypeScript, Go, Python, and System Architecture questions.",
     creator: "@mandy9943",
+    images: ["/twitter-image"],
   },
   robots: {
     index: true,
