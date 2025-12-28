@@ -41,4 +41,4 @@ A mobile-first active recall tool for Senior JavaScript Developers to practice a
 
 ## Customization
 
-Add more questions in `src/data/questions.ts`.
+Add more questions in `src/data/seed.ts` (original seed) and/or in `src/data/questions/**` (per-language, per-level banks).
