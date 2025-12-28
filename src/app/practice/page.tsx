@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -18,7 +18,7 @@ import {
   Timer
 } from 'lucide-react';
 
-export default function PracticePage() {
+function PracticeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { repository, refreshStats, isReady } = useInterview();
@@ -327,5 +327,20 @@ export default function PracticePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PracticePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center h-screen bg-white dark:bg-gray-900">
+        <div className="animate-pulse flex flex-col items-center">
+          <Brain size={48} className="text-blue-500 mb-4 animate-bounce" />
+          <p className="text-gray-400 font-bold uppercase tracking-widest">Loading Session...</p>
+        </div>
+      </div>
+    }>
+      <PracticeContent />
+    </Suspense>
   );
 }
