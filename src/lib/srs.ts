@@ -1,4 +1,4 @@
-import { Evaluation, UserQuestionRecord } from '@/types';
+import { Evaluation, EvaluationEvent, UserQuestionRecord } from '@/types';
 
 /**
  * Basic SRS Algorithm (SM-2 simplified)
@@ -6,6 +6,13 @@ import { Evaluation, UserQuestionRecord } from '@/types';
  */
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MAX_EVALUATION_EVENTS = 100;
+const MIN_EASE = 1.3;
+const MAX_EASE = 3.0;
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 export function calculateNextReview(
   evaluation: Evaluation,
@@ -26,6 +33,30 @@ export function calculateNextReview(
 
   record.timesSeen += 1;
   record.lastEvaluation = evaluation;
+  record.firstSeenAt = record.firstSeenAt ?? now;
+  record.lastSeenAt = now;
+  record.easeFactor = clamp(record.easeFactor ?? 2.5, MIN_EASE, MAX_EASE);
+
+  // Attempt history (backwards compatible)
+  const event: EvaluationEvent = { ts: now, evaluation };
+  record.evaluations = Array.isArray(record.evaluations) ? record.evaluations : [];
+  record.evaluations.push(event);
+  if (record.evaluations.length > MAX_EVALUATION_EVENTS) {
+    record.evaluations = record.evaluations.slice(-MAX_EVALUATION_EVENTS);
+  }
+
+  // Fast counters (backwards compatible)
+  record.goodCount = record.goodCount ?? 0;
+  record.kindOfCount = record.kindOfCount ?? 0;
+  record.badCount = record.badCount ?? 0;
+  if (evaluation === 'good') record.goodCount += 1;
+  else if (evaluation === 'kind_of') record.kindOfCount += 1;
+  else record.badCount += 1;
+
+  // Ease factor tuning (SM-2-ish, simplified)
+  if (evaluation === 'good') record.easeFactor = clamp(record.easeFactor + 0.05, MIN_EASE, MAX_EASE);
+  else if (evaluation === 'kind_of') record.easeFactor = clamp(record.easeFactor - 0.15, MIN_EASE, MAX_EASE);
+  else record.easeFactor = clamp(record.easeFactor - 0.2, MIN_EASE, MAX_EASE);
 
   if (evaluation === 'bad') {
     // Reset or very short interval
@@ -44,7 +75,7 @@ export function calculateNextReview(
     } else if (record.streak === 1) {
       record.interval = 3;
     } else {
-      record.interval = Math.round(record.interval * record.easeFactor);
+      record.interval = Math.max(1, Math.round(record.interval * record.easeFactor));
     }
     
     record.streak += 1;

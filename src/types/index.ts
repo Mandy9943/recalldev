@@ -4,6 +4,11 @@ export type Difficulty = 'Junior' | 'Mid' | 'Senior' | 'Staff';
 
 export type Evaluation = 'good' | 'kind_of' | 'bad';
 
+export interface EvaluationEvent {
+  ts: number; // timestamp (ms)
+  evaluation: Evaluation;
+}
+
 export interface Question {
   id: string;
   language: ProgrammingLanguage;
@@ -23,12 +28,65 @@ export interface UserQuestionRecord {
   easeFactor: number;
   lastEvaluation?: Evaluation;
   timesSeen: number;
+  firstSeenAt?: number; // timestamp (ms)
+  lastSeenAt?: number; // timestamp (ms)
+  evaluations?: EvaluationEvent[]; // optional for backwards compatibility
+  goodCount?: number;
+  kindOfCount?: number;
+  badCount?: number;
 }
 
 export interface UserStats {
   totalQuestionsSeen: number;
   masteryPercentage: number;
   daysStreak: number;
+  totalAttempts: number;
+  lastActivityAt?: number;
+  /**
+   * Optional helper counts (safe to ignore in UI; present when repository can compute them).
+   */
+  totalQuestions?: number;
+  unseenCount?: number;
+  dueNowCount?: number;
+}
+
+export interface RateStat {
+  attempts: number;
+  good: number;
+  kind_of: number;
+  bad: number;
+  goodRate: number; // 0..1
+  badRate: number; // 0..1
+}
+
+export interface TagStat extends RateStat {
+  tag: string;
+}
+
+export interface QuestionMissStat extends RateStat {
+  questionId: string;
+  language?: ProgrammingLanguage;
+  difficulty?: Difficulty;
+  tags?: string[];
+  prompt?: string;
+}
+
+export interface DailyActivityStat {
+  day: string; // YYYY-MM-DD in local time
+  attempts: number;
+  good: number;
+  kind_of: number;
+  bad: number;
+}
+
+export interface UserAnalytics {
+  stats: UserStats;
+  overall: RateStat;
+  byLanguage: Partial<Record<ProgrammingLanguage, RateStat>>;
+  byDifficulty: Partial<Record<Difficulty, RateStat>>;
+  topWeakTags: TagStat[];
+  topMissedQuestions: QuestionMissStat[];
+  activityByDay: DailyActivityStat[]; // last N days
 }
 
 // Data Abstraction Layer Interface
@@ -48,13 +106,29 @@ export interface IDataRepository {
     tags?: string[];
   }): Promise<Question[]>;
 
+  getNewQuestions(filters: {
+    languages?: ProgrammingLanguage[];
+    difficulties?: Difficulty[];
+    tags?: string[];
+    limit?: number;
+  }): Promise<Question[]>;
+
   // Progress
   getRecord(questionId: string): Promise<UserQuestionRecord | null>;
   saveEvaluation(questionId: string, evaluation: Evaluation): Promise<void>;
   
   // Stats
   getStats(): Promise<UserStats>;
+  getAnalytics(options?: { days?: number; topN?: number }): Promise<UserAnalytics>;
   
   // Setup
   syncQuestions(questions: Question[]): Promise<void>;
+  /**
+   * Reload any persisted state (e.g. localStorage) into the in-memory cache.
+   * Useful for multi-tab usage and "refresh analytics" actions.
+   */
+  refreshFromStorage(): Promise<void>;
+
+  // Maintenance
+  resetProgress(): Promise<void>;
 }

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -22,10 +22,15 @@ function PracticeContent() {
   const searchParams = useSearchParams();
   const { repository, refreshStats, isReady } = useInterview();
 
-  const lang = searchParams.get("lang") as ProgrammingLanguage;
-  const diff = searchParams.get("diff") as Difficulty;
   const tagsStr = searchParams.get("tags");
-  const tags = tagsStr ? tagsStr.split(",") : undefined;
+  const tags = useMemo(
+    () => (tagsStr ? tagsStr.split(",") : undefined),
+    [tagsStr]
+  );
+
+  const lang =
+    (searchParams.get("lang") as ProgrammingLanguage | null) ?? undefined;
+  const diff = (searchParams.get("diff") as Difficulty | null) ?? undefined;
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -48,15 +53,28 @@ function PracticeContent() {
       // 2. If session is too small, fill with new ones
       let sessionQuestions = [...due];
       if (sessionQuestions.length < 5) {
-        const all = await repository.getQuestions({
+        const unseen = await repository.getNewQuestions({
           languages: lang ? [lang] : undefined,
           difficulties: diff ? [diff] : undefined,
           tags,
+          limit: 5 - due.length,
         });
+        sessionQuestions = [...due, ...unseen];
 
-        // Filter out those already in due
-        const newOnes = all.filter((q) => !due.some((d) => d.id === q.id));
-        sessionQuestions = [...due, ...newOnes.slice(0, 5 - due.length)];
+        // 3. If still too small, optionally backfill with not-due questions (keeps sessions usable)
+        if (sessionQuestions.length < 5) {
+          const all = await repository.getQuestions({
+            languages: lang ? [lang] : undefined,
+            difficulties: diff ? [diff] : undefined,
+            tags,
+          });
+          const alreadyPicked = new Set(sessionQuestions.map((q) => q.id));
+          const backfill = all.filter((q) => !alreadyPicked.has(q.id));
+          sessionQuestions = [
+            ...sessionQuestions,
+            ...backfill.slice(0, 5 - sessionQuestions.length),
+          ];
+        }
       }
 
       // Shuffle session
