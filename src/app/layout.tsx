@@ -91,8 +91,8 @@ export const viewport = {
   ],
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Allow zoom for accessibility. Also opt into safe-area usage on devices with notches/home indicators.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

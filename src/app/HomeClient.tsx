@@ -14,13 +14,61 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+type RecallDevPrefs = {
+  lang?: ProgrammingLanguage;
+  diff?: Difficulty;
+  tags?: string[];
+  len?: number;
+};
+
+function readPrefs(): RecallDevPrefs | null {
+  try {
+    const raw = localStorage.getItem("recall_dev_v2_prefs");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const p = parsed as any;
+    const out: RecallDevPrefs = {};
+    if (typeof p.lang === "string") out.lang = p.lang as ProgrammingLanguage;
+    if (typeof p.diff === "string") out.diff = p.diff as Difficulty;
+    if (Array.isArray(p.tags) && p.tags.every((t: unknown) => typeof t === "string")) {
+      out.tags = p.tags as string[];
+    }
+    if (typeof p.len === "number" && Number.isFinite(p.len)) out.len = p.len as number;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function writePrefs(prefs: RecallDevPrefs) {
+  try {
+    localStorage.setItem("recall_dev_v2_prefs", JSON.stringify(prefs));
+  } catch {
+    // ignore
+  }
+}
+
 export function HomeClient() {
   const { repository, stats, isReady } = useInterview();
 
-  const [selectedLanguage, setSelectedLanguage] =
-    useState<ProgrammingLanguage>("JavaScript");
-  const [selectedDifficulty, setSelectedDifficulty] =
-    useState<Difficulty>("Senior");
+  const [selectedLanguage, setSelectedLanguage] = useState<ProgrammingLanguage>(
+    () => {
+      if (typeof window === "undefined") return "JavaScript";
+      return readPrefs()?.lang ?? "JavaScript";
+    }
+  );
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(
+    () => {
+      if (typeof window === "undefined") return "Senior";
+      return readPrefs()?.diff ?? "Senior";
+    }
+  );
+  const [sessionLength, setSessionLength] = useState<number>(() => {
+    if (typeof window === "undefined") return 10;
+    const n = readPrefs()?.len ?? 10;
+    return Number.isFinite(n) ? Math.max(1, Math.min(50, Math.trunc(n))) : 10;
+  });
 
   const [availableLanguages, setAvailableLanguages] = useState<
     ProgrammingLanguage[]
@@ -30,9 +78,23 @@ export function HomeClient() {
   >([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
 
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    return readPrefs()?.tags ?? [];
+  });
   const [dueCount, setDueCount] = useState(0);
   const [newCount, setNewCount] = useState(0);
+
+  // Persist preferences for use across pages (dashboard/progress/practice).
+  useEffect(() => {
+    if (!isReady) return;
+    writePrefs({
+      lang: selectedLanguage,
+      diff: selectedDifficulty,
+      tags: selectedTags,
+      len: sessionLength,
+    });
+  }, [isReady, selectedLanguage, selectedDifficulty, selectedTags, sessionLength]);
 
   // Load available metadata (Languages & Difficulties) from ALL questions on mount
   useEffect(() => {
@@ -61,10 +123,13 @@ export function HomeClient() {
       if (languages.length > 0 && !languages.includes(selectedLanguage)) {
         setSelectedLanguage(languages[0]);
       }
+      if (difficulties.length > 0 && !difficulties.includes(selectedDifficulty)) {
+        setSelectedDifficulty(difficulties[0]);
+      }
     };
 
     loadGlobalMetadata();
-  }, [isReady, repository, selectedLanguage]); // Run only when repo is ready
+  }, [isReady, repository, selectedLanguage, selectedDifficulty]); // Run only when repo is ready
 
   // Load tags and due count when selection changes
   useEffect(() => {
@@ -79,6 +144,8 @@ export function HomeClient() {
 
       const tags = Array.from(new Set(filtered.flatMap((q) => q.tags)));
       setAvailableTags(tags.sort());
+      // If previously selected tags are no longer available for this selection, drop them.
+      setSelectedTags((prev) => prev.filter((t) => tags.includes(t)));
 
       const due = await repository.getDueQuestions({
         languages: [selectedLanguage],
@@ -109,8 +176,9 @@ export function HomeClient() {
     params.set("lang", selectedLanguage);
     params.set("diff", selectedDifficulty);
     if (selectedTags.length) params.set("tags", selectedTags.join(","));
+    params.set("len", String(sessionLength));
     return `/practice?${params.toString()}`;
-  }, [selectedLanguage, selectedDifficulty, selectedTags]);
+  }, [selectedLanguage, selectedDifficulty, selectedTags, sessionLength]);
 
   // Important for SEO: `/` is now server-rendered. This is only the interactive dashboard.
   if (!isReady) {
@@ -242,6 +310,27 @@ export function HomeClient() {
                   No topics found for this selection.
                 </span>
               )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
+              <Play size={16} /> Session Length
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {[5, 10, 15].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setSessionLength(n)}
+                  className={`px-4 py-2 rounded-xl font-bold transition-all ${
+                    sessionLength === n
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {n}Q
+                </button>
+              ))}
             </div>
           </div>
         </section>

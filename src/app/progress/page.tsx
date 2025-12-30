@@ -16,6 +16,51 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+type RecallDevPrefs = {
+  lang?: string;
+  diff?: string;
+  tags?: string[];
+  len?: number;
+};
+
+function getPrefsFromStorage(): RecallDevPrefs | null {
+  try {
+    const raw = localStorage.getItem("recall_dev_v2_prefs");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const p = parsed as any;
+    const out: RecallDevPrefs = {};
+    if (typeof p.lang === "string") out.lang = p.lang;
+    if (typeof p.diff === "string") out.diff = p.diff;
+    if (Array.isArray(p.tags) && p.tags.every((t: unknown) => typeof t === "string")) {
+      out.tags = p.tags;
+    }
+    if (typeof p.len === "number" && Number.isFinite(p.len)) out.len = p.len;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function buildPracticeHref(input: {
+  tags?: string[];
+}): string {
+  const params = new URLSearchParams();
+  const prefs = getPrefsFromStorage();
+  const lang = prefs?.lang;
+  const diff = prefs?.diff;
+  const len = prefs?.len;
+
+  if (lang) params.set("lang", lang);
+  if (diff) params.set("diff", diff);
+  if (input.tags?.length) params.set("tags", input.tags.join(","));
+  if (len) params.set("len", String(len));
+
+  const qs = params.toString();
+  return qs ? `/practice?${qs}` : "/practice";
+}
+
 export default function ProgressPage() {
   const { repository, refreshStats, isReady } = useInterview();
   const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
@@ -96,6 +141,7 @@ export default function ProgressPage() {
     1,
     ...analytics.activityByDay.map((d) => d.attempts)
   );
+  const topWeakTags = analytics.topWeakTags.slice(0, 3).map((t) => t.tag);
 
   return (
     <div className="flex flex-col min-h-screen bg-white dark:bg-gray-950 transition-colors duration-300">
@@ -168,6 +214,53 @@ export default function ProgressPage() {
               Accuracy
             </span>
           </div>
+        </div>
+
+        {/* Practice CTAs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Link
+            href={buildPracticeHref({ tags: topWeakTags.length ? topWeakTags : undefined })}
+            className="p-6 rounded-3xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-500 dark:hover:border-blue-400 transition-all shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Recommended
+                </p>
+                <p className="mt-2 text-lg font-black text-gray-900 dark:text-white">
+                  Practice weakest topics
+                </p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Jump straight into a session biased toward your highest fail-rate tags.
+                </p>
+              </div>
+              <div className="shrink-0 p-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">
+                <Brain size={22} />
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/"
+            className="p-6 rounded-3xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-500 dark:hover:border-blue-400 transition-all shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Continue
+                </p>
+                <p className="mt-2 text-lg font-black text-gray-900 dark:text-white">
+                  Back to dashboard
+                </p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Change filters and start another session.
+                </p>
+              </div>
+              <div className="shrink-0 p-3 rounded-2xl bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                <ArrowLeft className="rotate-180" size={22} />
+              </div>
+            </div>
+          </Link>
         </div>
 
         {/* Info Card */}
@@ -248,8 +341,9 @@ export default function ProgressPage() {
               {analytics.topWeakTags.map((t) => {
                 const badPct = Math.round(t.badRate * 100);
                 return (
-                  <div
+                  <Link
                     key={t.tag}
+                    href={buildPracticeHref({ tags: [t.tag] })}
                     className="flex items-center justify-between p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800"
                   >
                     <div className="flex flex-col">
@@ -268,7 +362,7 @@ export default function ProgressPage() {
                         fail rate
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>
@@ -297,9 +391,11 @@ export default function ProgressPage() {
                 const title = (q.prompt || "")
                   .replace(/\s+/g, " ")
                   .slice(0, 90);
+                const tagLink = (q.tags || []).slice(0, 3);
                 return (
-                  <div
+                  <Link
                     key={q.questionId}
+                    href={buildPracticeHref({ tags: tagLink.length ? tagLink : undefined })}
                     className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800"
                   >
                     <div className="flex items-start justify-between gap-4">
@@ -341,7 +437,7 @@ export default function ProgressPage() {
                         </span>
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>

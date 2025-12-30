@@ -15,7 +15,16 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: 'any',
         type: 'image/x-icon',
       },
-      // Note: User should add 192x192 and 512x512 icons for better PWA support
+      {
+        src: '/icon-192.svg',
+        sizes: '192x192',
+        type: 'image/svg+xml',
+      },
+      {
+        src: '/icon-512.svg',
+        sizes: '512x512',
+        type: 'image/svg+xml',
+      },
     ],
   }
 }

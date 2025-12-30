@@ -1,6 +1,7 @@
 "use client";
 
 import { useInterview } from "@/context/InterviewContext";
+import { buildPracticeSession, sessionSeedForToday } from "@/lib/session";
 import { Difficulty, Evaluation, ProgrammingLanguage, Question } from "@/types";
 import {
   AlertCircle,
@@ -31,59 +32,85 @@ function PracticeContent() {
   const lang =
     (searchParams.get("lang") as ProgrammingLanguage | null) ?? undefined;
   const diff = (searchParams.get("diff") as Difficulty | null) ?? undefined;
+  const lenParam = searchParams.get("len");
+  const sessionSize = useMemo(() => {
+    const parsed = lenParam ? Number(lenParam) : 10;
+    if (!Number.isFinite(parsed)) return 10;
+    // Allow common sizes; clamp to a safe range.
+    const n = Math.max(1, Math.min(50, Math.trunc(parsed)));
+    return n;
+  }, [lenParam]);
+  const allowExtraPractice = searchParams.get("extra") === "1";
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isRevealed, setIsRevealed] = useState(false);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [makeup, setMakeup] = useState<{ due: number; new: number; extra: number } | null>(null);
+  const [allCaughtUp, setAllCaughtUp] = useState(false);
 
   // Load smart questions for the session
   useEffect(() => {
     if (!isReady) return;
 
     const loadSession = async () => {
-      // 1. Get questions due for review
-      const due = await repository.getDueQuestions({
+      setIsLoading(true);
+      setSessionComplete(false);
+      setCurrentIndex(0);
+      setIsRevealed(false);
+
+      const seed = sessionSeedForToday({
         languages: lang ? [lang] : undefined,
         difficulties: diff ? [diff] : undefined,
         tags,
       });
 
-      // 2. If session is too small, fill with new ones
-      let sessionQuestions = [...due];
-      if (sessionQuestions.length < 5) {
-        const unseen = await repository.getNewQuestions({
-          languages: lang ? [lang] : undefined,
-          difficulties: diff ? [diff] : undefined,
-          tags,
-          limit: 5 - due.length,
-        });
-        sessionQuestions = [...due, ...unseen];
+      // Phase 1: always build WITHOUT extra practice to detect "caught up" state.
+      const base = await buildPracticeSession({
+        repository,
+        languages: lang ? [lang] : undefined,
+        difficulties: diff ? [diff] : undefined,
+        tags,
+        sessionSize,
+        allowExtraPractice: false,
+        seed,
+      });
 
-        // 3. If still too small, optionally backfill with not-due questions (keeps sessions usable)
-        if (sessionQuestions.length < 5) {
-          const all = await repository.getQuestions({
+      const isCaughtUp = base.makeup.due + base.makeup.new === 0;
+      setAllCaughtUp(isCaughtUp);
+
+      if (isCaughtUp && !allowExtraPractice) {
+        setQuestions([]);
+        setMakeup(base.makeup);
+        setIsLoading(false);
+        return;
+      }
+
+      // If the user has *some* due/new, we can safely backfill with extras to keep the session usable.
+      // But if they're fully caught up (no due/new), we require explicit opt-in via `extra=1`.
+      const shouldBackfillExtras =
+        allowExtraPractice || (!isCaughtUp && base.questions.length < sessionSize);
+
+      const session = shouldBackfillExtras
+        ? await buildPracticeSession({
+            repository,
             languages: lang ? [lang] : undefined,
             difficulties: diff ? [diff] : undefined,
             tags,
-          });
-          const alreadyPicked = new Set(sessionQuestions.map((q) => q.id));
-          const backfill = all.filter((q) => !alreadyPicked.has(q.id));
-          sessionQuestions = [
-            ...sessionQuestions,
-            ...backfill.slice(0, 5 - sessionQuestions.length),
-          ];
-        }
-      }
+            sessionSize,
+            allowExtraPractice: true,
+            seed,
+          })
+        : base;
 
-      // Shuffle session
-      setQuestions(sessionQuestions.sort(() => Math.random() - 0.5));
+      setQuestions(session.questions);
+      setMakeup(session.makeup);
       setIsLoading(false);
     };
 
     loadSession();
-  }, [isReady, repository, lang, diff, tags]);
+  }, [isReady, repository, lang, diff, tags, sessionSize, allowExtraPractice]);
 
   const currentQuestion = questions[currentIndex];
 
@@ -120,12 +147,29 @@ function PracticeContent() {
       <div className="flex flex-col items-center justify-center h-screen p-6 text-center bg-white dark:bg-gray-900">
         <History size={48} className="text-gray-200 mb-6" />
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-          Nothing to review!
+          {allCaughtUp ? "All caught up!" : "Nothing to review!"}
         </h2>
         <p className="text-gray-500 dark:text-gray-400 mb-8">
-          You are all caught up for this selection. Try changing the filters or
-          language.
+          {allCaughtUp
+            ? "You have no due reviews and no new questions for this selection."
+            : "Try changing the filters or language."}
         </p>
+        {allCaughtUp && (
+          <Link
+            href={`/practice?${(() => {
+              const params = new URLSearchParams();
+              if (lang) params.set("lang", lang);
+              if (diff) params.set("diff", diff);
+              if (tags?.length) params.set("tags", tags.join(","));
+              params.set("len", String(sessionSize));
+              params.set("extra", "1");
+              return params.toString();
+            })()}`}
+            className="w-full max-w-sm bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all flex items-center justify-center gap-2 mb-4"
+          >
+            Practice anyway (extra)
+          </Link>
+        )}
         <Link
           href="/"
           className="text-blue-600 dark:text-blue-400 font-bold flex items-center gap-2"
@@ -182,6 +226,11 @@ function PracticeContent() {
               <span className="text-[10px] font-black bg-gray-100 dark:bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded uppercase">
                 {currentQuestion.difficulty}
               </span>
+              {makeup ? (
+                <span className="text-[10px] font-black bg-gray-50 dark:bg-gray-800/70 text-gray-500 px-1.5 py-0.5 rounded uppercase">
+                  {makeup.due} due / {makeup.new} new{makeup.extra ? ` / ${makeup.extra} extra` : ""}
+                </span>
+              ) : null}
             </div>
             <span className="text-sm font-bold text-gray-800 dark:text-gray-100">
               Question {currentIndex + 1} of {questions.length}
@@ -190,7 +239,7 @@ function PracticeContent() {
         </div>
         <div className="flex items-center gap-1 text-gray-400">
           <Timer size={14} />
-          <span className="text-xs font-mono font-bold">5m session</span>
+          <span className="text-xs font-mono font-bold">{questions.length}Q</span>
         </div>
       </header>
 
@@ -236,6 +285,8 @@ function PracticeContent() {
                             fontSize: "0.85rem",
                             lineHeight: "1.6",
                             borderRadius: "1rem",
+                            overflowX: "auto",
+                            maxWidth: "100%",
                           }}
                           {...props}
                         >
@@ -306,6 +357,8 @@ function PracticeContent() {
                                 margin: "0.5rem 0",
                                 fontSize: "0.8rem",
                                 lineHeight: "1.4",
+                                overflowX: "auto",
+                                maxWidth: "100%",
                               }}
                               {...props}
                             >
@@ -370,12 +423,13 @@ function PracticeContent() {
         </div>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 z-20 shadow-lg">
+      <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 z-20 shadow-lg">
         <div className="max-w-3xl mx-auto">
           {!isRevealed ? (
             <button
               onClick={() => setIsRevealed(true)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-5 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] text-xl flex items-center justify-center gap-3"
+              aria-label="Show the answer"
             >
               <Brain size={24} /> Show Answer
             </button>
@@ -388,6 +442,7 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("bad")}
                   className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                  aria-label="Mark as fail"
                 >
                   <span className="text-3xl mb-1">👎</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
@@ -398,6 +453,7 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("kind_of")}
                   className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-yellow-100 dark:border-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all"
+                  aria-label="Mark as kind of"
                 >
                   <span className="text-3xl mb-1">🤔</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
@@ -408,6 +464,7 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("good")}
                   className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-green-100 dark:border-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all"
+                  aria-label="Mark as mastered"
                 >
                   <span className="text-3xl mb-1">👍</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
