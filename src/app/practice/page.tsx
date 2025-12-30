@@ -10,7 +10,9 @@ import {
   CheckCircle2,
   History,
   Home,
+  Keyboard,
   Timer,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -47,8 +49,10 @@ function PracticeContent() {
   const [isRevealed, setIsRevealed] = useState(false);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
   const [makeup, setMakeup] = useState<{ due: number; new: number; extra: number } | null>(null);
   const [allCaughtUp, setAllCaughtUp] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Load smart questions for the session
   useEffect(() => {
@@ -116,18 +120,90 @@ function PracticeContent() {
 
   const handleEvaluation = async (evalType: Evaluation) => {
     if (!currentQuestion) return;
+    if (isSavingEvaluation) return;
 
-    await repository.saveEvaluation(currentQuestion.id, evalType);
+    setIsSavingEvaluation(true);
+    try {
+      await repository.saveEvaluation(currentQuestion.id, evalType);
 
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-      setIsRevealed(false);
-      window.scrollTo(0, 0);
-    } else {
-      await refreshStats();
-      setSessionComplete(true);
+      if (currentIndex < questions.length - 1) {
+        setCurrentIndex((prev) => prev + 1);
+        setIsRevealed(false);
+        window.scrollTo(0, 0);
+      } else {
+        await refreshStats();
+        setSessionComplete(true);
+      }
+    } finally {
+      setIsSavingEvaluation(false);
     }
   };
+
+  // Keyboard shortcuts (desktop): Space/Enter reveal, 1/2/3 grade, ? opens help, Esc closes help.
+  useEffect(() => {
+    if (!isReady) return;
+    if (isLoading) return;
+    if (sessionComplete) return;
+    if (!currentQuestion) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable) {
+        return;
+      }
+
+      if (showShortcuts) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setShowShortcuts(false);
+        }
+        return;
+      }
+
+      if (e.key === "?") {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
+
+      if (!isRevealed) {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          setIsRevealed(true);
+        }
+        return;
+      }
+
+      if (isSavingEvaluation) return;
+
+      if (e.key === "1") {
+        e.preventDefault();
+        handleEvaluation("bad");
+      } else if (e.key === "2") {
+        e.preventDefault();
+        handleEvaluation("kind_of");
+      } else if (e.key === "3") {
+        e.preventDefault();
+        handleEvaluation("good");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    isReady,
+    isLoading,
+    sessionComplete,
+    currentQuestion,
+    isRevealed,
+    isSavingEvaluation,
+    showShortcuts,
+    handleEvaluation,
+  ]);
 
   if (isLoading || !isReady) {
     return (
@@ -237,9 +313,19 @@ function PracticeContent() {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 text-gray-400">
-          <Timer size={14} />
-          <span className="text-xs font-mono font-bold">{questions.length}Q</span>
+        <div className="flex items-center gap-2 text-gray-400">
+          <button
+            type="button"
+            onClick={() => setShowShortcuts(true)}
+            className="p-2 -mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            aria-label="Keyboard shortcuts"
+          >
+            <Keyboard size={16} />
+          </button>
+          <div className="flex items-center gap-1">
+            <Timer size={14} />
+            <span className="text-xs font-mono font-bold">{questions.length}Q</span>
+          </div>
         </div>
       </header>
 
@@ -423,6 +509,90 @@ function PracticeContent() {
         </div>
       </main>
 
+      {showShortcuts && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm p-4 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Keyboard shortcuts"
+          onMouseDown={() => setShowShortcuts(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl p-6"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Practice
+                </p>
+                <h2 className="mt-1 text-lg font-black text-gray-900 dark:text-white">
+                  Keyboard shortcuts
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcuts(false)}
+                className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                aria-label="Close shortcuts"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3 text-sm text-gray-700 dark:text-gray-200">
+              <div className="flex items-center justify-between gap-4">
+                <span>Show answer</span>
+                <span className="flex items-center gap-2">
+                  <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                    Space
+                  </kbd>
+                  <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                    Enter
+                  </kbd>
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <span>Grade: Fail</span>
+                <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                  1
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>Grade: Kind of</span>
+                <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                  2
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>Grade: Mastered</span>
+                <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                  3
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <span>Open/close this help</span>
+                <span className="flex items-center gap-2">
+                  <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                    ?
+                  </kbd>
+                  <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                    Esc
+                  </kbd>
+                </span>
+              </div>
+            </div>
+
+            <p className="mt-5 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              Tip: shortcuts work best on desktop. On mobile, the buttons are the
+              fastest path.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 z-20 shadow-lg">
         <div className="max-w-3xl mx-auto">
           {!isRevealed ? (
@@ -441,34 +611,46 @@ function PracticeContent() {
               <div className="grid grid-cols-3 gap-4">
                 <button
                   onClick={() => handleEvaluation("bad")}
-                  className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                  disabled={isSavingEvaluation}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
                   aria-label="Mark as fail"
                 >
                   <span className="text-3xl mb-1">👎</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
                     Fail
                   </span>
+                  <span className="mt-1 text-[10px] font-mono font-black text-red-400/80">
+                    1
+                  </span>
                 </button>
 
                 <button
                   onClick={() => handleEvaluation("kind_of")}
-                  className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-yellow-100 dark:border-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all"
+                  disabled={isSavingEvaluation}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-yellow-100 dark:border-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
                   aria-label="Mark as kind of"
                 >
                   <span className="text-3xl mb-1">🤔</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
                     Kind of
                   </span>
+                  <span className="mt-1 text-[10px] font-mono font-black text-yellow-400/80">
+                    2
+                  </span>
                 </button>
 
                 <button
                   onClick={() => handleEvaluation("good")}
-                  className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-green-100 dark:border-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all"
+                  disabled={isSavingEvaluation}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-green-100 dark:border-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
                   aria-label="Mark as mastered"
                 >
                   <span className="text-3xl mb-1">👍</span>
                   <span className="text-[10px] font-black uppercase tracking-widest">
                     Mastered
+                  </span>
+                  <span className="mt-1 text-[10px] font-mono font-black text-green-400/80">
+                    3
                   </span>
                 </button>
               </div>

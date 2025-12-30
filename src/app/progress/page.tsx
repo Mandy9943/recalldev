@@ -1,7 +1,7 @@
 "use client";
 
 import { useInterview } from "@/context/InterviewContext";
-import { UserAnalytics } from "@/types";
+import { Question, UserAnalytics } from "@/types";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -14,7 +14,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type RecallDevPrefs = {
   lang?: string;
@@ -65,6 +65,8 @@ export default function ProgressPage() {
   const { repository, refreshStats, isReady } = useInterview();
   const [analytics, setAnalytics] = useState<UserAnalytics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [dataMessage, setDataMessage] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!isReady) return;
@@ -106,6 +108,137 @@ export default function ProgressPage() {
       setAnalytics(a);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const looksLikeQuestions = (value: unknown): value is Question[] => {
+    if (!Array.isArray(value)) return false;
+    // Minimal validation
+    return value.every(
+      (q) =>
+        q &&
+        typeof q === "object" &&
+        typeof (q as Question).id === "string" &&
+        typeof (q as Question).question === "string" &&
+        Array.isArray((q as Question).tags)
+    );
+  };
+
+  const handleExportData = async () => {
+    try {
+      setDataMessage(null);
+      // Ensure we export the freshest state.
+      await repository.refreshFromStorage();
+
+      const rawProgress = localStorage.getItem("recall_dev_v2_progress");
+      const rawQuestions = localStorage.getItem("recall_dev_v2_questions");
+      const rawPrefs = localStorage.getItem("recall_dev_v2_prefs");
+
+      const backup = {
+        app: "RecallDev",
+        version: 2,
+        exportedAt: Date.now(),
+        data: {
+          progress: rawProgress ? (JSON.parse(rawProgress) as unknown) : null,
+          questions: rawQuestions ? (JSON.parse(rawQuestions) as unknown) : null,
+          prefs: rawPrefs ? (JSON.parse(rawPrefs) as unknown) : null,
+        },
+      };
+
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const filename = `recalldev-backup-${yyyy}-${mm}-${dd}.json`;
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setDataMessage("Exported a backup JSON file.");
+    } catch {
+      setDataMessage("Export failed. Please try again.");
+    }
+  };
+
+  const handleImportClick = () => {
+    setDataMessage(null);
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile: React.ChangeEventHandler<HTMLInputElement> = async (
+    e
+  ) => {
+    const file = e.currentTarget.files?.[0];
+    // Allow importing the same file again.
+    e.currentTarget.value = "";
+    if (!file) return;
+
+    try {
+      setDataMessage(null);
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+
+      if (!parsed || typeof parsed !== "object") {
+        setDataMessage("Import failed: invalid JSON format.");
+        return;
+      }
+
+      const p = parsed as any;
+      const data = p?.data;
+      const nextProgress = data?.progress;
+      const nextQuestions = data?.questions;
+      const nextPrefs = data?.prefs;
+
+      const hasProgress = nextProgress && typeof nextProgress === "object";
+      const hasQuestions = looksLikeQuestions(nextQuestions);
+      const hasPrefs = nextPrefs && typeof nextPrefs === "object";
+
+      if (!hasProgress && !hasQuestions && !hasPrefs) {
+        setDataMessage("Import failed: no recognizable RecallDev data found.");
+        return;
+      }
+
+      if (
+        !confirm(
+          "Import will replace your local RecallDev data (progress, and possibly questions/settings). Continue?"
+        )
+      ) {
+        return;
+      }
+
+      if (hasProgress) {
+        localStorage.setItem(
+          "recall_dev_v2_progress",
+          JSON.stringify(nextProgress)
+        );
+      }
+      if (hasQuestions) {
+        localStorage.setItem(
+          "recall_dev_v2_questions",
+          JSON.stringify(nextQuestions)
+        );
+      }
+      if (hasPrefs) {
+        localStorage.setItem("recall_dev_v2_prefs", JSON.stringify(nextPrefs));
+      }
+
+      await repository.refreshFromStorage();
+      await refreshStats();
+      const a = await repository.getAnalytics({ days: 14, topN: 10 });
+      setAnalytics(a);
+
+      setDataMessage("Import successful.");
+    } catch {
+      setDataMessage("Import failed. Make sure you selected a valid backup JSON.");
     }
   };
 
@@ -466,9 +599,46 @@ export default function ProgressPage() {
 
         {/* Reset Section */}
         <div className="pt-12 flex flex-col items-center">
+          <div className="w-full max-w-xl bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800">
+            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">
+              Backup & Restore
+            </h3>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+              RecallDev stores everything on this device. Export a backup to move your progress to another browser/device.
+            </p>
+
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                onClick={handleExportData}
+                className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3 rounded-2xl font-black transition-all active:scale-[0.98]"
+              >
+                Export data
+              </button>
+              <button
+                onClick={handleImportClick}
+                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 py-3 rounded-2xl font-black transition-all active:scale-[0.98]"
+              >
+                Import data
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+            </div>
+
+            {dataMessage ? (
+              <p className="mt-3 text-xs font-bold text-gray-500 dark:text-gray-400">
+                {dataMessage}
+              </p>
+            ) : null}
+          </div>
+
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 text-red-500 dark:text-red-400 text-xs font-black uppercase tracking-widest hover:bg-red-50 dark:hover:bg-red-900/10 px-6 py-3 rounded-xl transition-colors"
+            className="mt-8 flex items-center gap-2 text-red-500 dark:text-red-400 text-xs font-black uppercase tracking-widest hover:bg-red-50 dark:hover:bg-red-900/10 px-6 py-3 rounded-xl transition-colors"
           >
             <History size={16} /> Reset All Data
           </button>
