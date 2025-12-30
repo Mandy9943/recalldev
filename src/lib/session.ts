@@ -93,13 +93,17 @@ export async function buildPracticeSession(
       tags: input.tags,
     });
 
-  const due = await input.repository.getDueQuestions({
+  const dueAll = await input.repository.getDueQuestions({
     languages: input.languages as any,
     difficulties: input.difficulties as any,
     tags: input.tags,
   });
 
-  const remainingAfterDue = Math.max(0, sessionSize - due.length);
+  // If due exceeds session size, pick the most overdue subset first (repository orders by priority),
+  // then shuffle within that subset for variety.
+  const duePicked = dueAll.length > sessionSize ? dueAll.slice(0, sessionSize) : dueAll;
+
+  const remainingAfterDue = Math.max(0, sessionSize - duePicked.length);
   const unseen =
     remainingAfterDue > 0
       ? await input.repository.getNewQuestions({
@@ -113,7 +117,7 @@ export async function buildPracticeSession(
   let extra: Question[] = [];
   const remainingAfterNew = Math.max(
     0,
-    sessionSize - due.length - unseen.length
+    sessionSize - duePicked.length - unseen.length
   );
   if (remainingAfterNew > 0 && input.allowExtraPractice) {
     const all = await input.repository.getQuestions({
@@ -121,12 +125,12 @@ export async function buildPracticeSession(
       difficulties: input.difficulties as any,
       tags: input.tags,
     });
-    const picked = new Set([...due, ...unseen].map((q) => q.id));
+    const picked = new Set([...duePicked, ...unseen].map((q) => q.id));
     extra = all.filter((q) => !picked.has(q.id)).slice(0, remainingAfterNew);
   }
 
   // Stable shuffle WITHIN buckets so we preserve due-first ordering.
-  const dueShuffled = stableShuffle(due, seed ^ 0xa1b2c3d4);
+  const dueShuffled = stableShuffle(duePicked, seed ^ 0xa1b2c3d4);
   const newShuffled = stableShuffle(unseen, seed ^ 0x1b2c3d4e);
   const extraShuffled = stableShuffle(extra, seed ^ 0xdeadbeef);
 
@@ -138,12 +142,9 @@ export async function buildPracticeSession(
   return {
     questions,
     makeup: {
-      due: Math.min(due.length, sessionSize),
-      new: Math.max(0, Math.min(unseen.length, sessionSize - due.length)),
-      extra: Math.max(
-        0,
-        Math.min(extra.length, sessionSize - due.length - unseen.length)
-      ),
+      due: dueShuffled.length,
+      new: newShuffled.length,
+      extra: extraShuffled.length,
     },
   };
 }

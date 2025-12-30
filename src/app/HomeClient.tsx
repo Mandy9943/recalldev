@@ -145,19 +145,31 @@ export function HomeClient() {
       const tags = Array.from(new Set(filtered.flatMap((q) => q.tags)));
       setAvailableTags(tags.sort());
       // If previously selected tags are no longer available for this selection, drop them.
-      setSelectedTags((prev) => prev.filter((t) => tags.includes(t)));
+      // IMPORTANT: avoid returning a new array when nothing changes, otherwise this effect
+      // will loop forever (since it depends on `selectedTags`).
+      setSelectedTags((prev) => {
+        const next = prev.filter((t) => tags.includes(t));
+        if (next.length === prev.length && next.every((t, i) => t === prev[i])) {
+          return prev;
+        }
+        return next;
+      });
+
+      const effectiveSelectedTags = selectedTags.length
+        ? selectedTags.filter((t) => tags.includes(t))
+        : [];
 
       const due = await repository.getDueQuestions({
         languages: [selectedLanguage],
         difficulties: [selectedDifficulty],
-        tags: selectedTags.length ? selectedTags : undefined,
+        tags: effectiveSelectedTags.length ? effectiveSelectedTags : undefined,
       });
       setDueCount(due.length);
 
       const unseen = await repository.getNewQuestions({
         languages: [selectedLanguage],
         difficulties: [selectedDifficulty],
-        tags: selectedTags.length ? selectedTags : undefined,
+        tags: effectiveSelectedTags.length ? effectiveSelectedTags : undefined,
       });
       setNewCount(unseen.length);
     };

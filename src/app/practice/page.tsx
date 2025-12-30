@@ -2,6 +2,7 @@
 
 import { useInterview } from "@/context/InterviewContext";
 import { buildPracticeSession, sessionSeedForToday } from "@/lib/session";
+import { formatIntervalDaysShort, formatNextReviewIn } from "@/lib/srs";
 import { Difficulty, Evaluation, ProgrammingLanguage, Question } from "@/types";
 import {
   AlertCircle,
@@ -53,6 +54,17 @@ function PracticeContent() {
   const [makeup, setMakeup] = useState<{ due: number; new: number; extra: number } | null>(null);
   const [allCaughtUp, setAllCaughtUp] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [reviewToast, setReviewToast] = useState<{
+    title: string;
+    detail?: string;
+  } | null>(null);
+
+  // Auto-hide toast after grading.
+  useEffect(() => {
+    if (!reviewToast) return;
+    const t = window.setTimeout(() => setReviewToast(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [reviewToast]);
 
   // Load smart questions for the session
   useEffect(() => {
@@ -125,6 +137,21 @@ function PracticeContent() {
     setIsSavingEvaluation(true);
     try {
       await repository.saveEvaluation(currentQuestion.id, evalType);
+      const updated = await repository.getRecord(currentQuestion.id);
+      if (updated) {
+        const inText = formatNextReviewIn(updated.nextReviewDate);
+        const atText = new Date(updated.nextReviewDate).toLocaleString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        setReviewToast({
+          title: `Next review in ${inText}`,
+          detail: `Interval ${formatIntervalDaysShort(updated.interval)} • Streak ${updated.streak} • ${atText}`,
+        });
+      }
 
       if (currentIndex < questions.length - 1) {
         setCurrentIndex((prev) => prev + 1);
@@ -286,6 +313,20 @@ function PracticeContent() {
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
+      {reviewToast && (
+        <div className="fixed top-16 md:top-20 left-0 right-0 z-30 px-4 pointer-events-none">
+          <div className="max-w-xl mx-auto rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm shadow-xl px-4 py-3">
+            <p className="text-sm font-black text-gray-900 dark:text-white">
+              {reviewToast.title}
+            </p>
+            {reviewToast.detail ? (
+              <p className="mt-0.5 text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                {reviewToast.detail}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
       <header className="bg-white dark:bg-gray-900 px-4 md:px-6 py-3 md:py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <Link
