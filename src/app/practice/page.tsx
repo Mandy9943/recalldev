@@ -43,6 +43,7 @@ function PracticeContent() {
     const n = Math.max(1, Math.min(50, Math.trunc(parsed)));
     return n;
   }, [lenParam]);
+  const mode = searchParams.get("mode") === "due" ? "due" : "mix";
   const allowExtraPractice = searchParams.get("extra") === "1";
 
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -89,11 +90,13 @@ function PracticeContent() {
         difficulties: diff ? [diff] : undefined,
         tags,
         sessionSize,
+        includeNew: mode !== "due",
         allowExtraPractice: false,
         seed,
       });
 
-      const isCaughtUp = base.makeup.due + base.makeup.new === 0;
+      const isCaughtUp =
+        mode === "due" ? base.makeup.due === 0 : base.makeup.due + base.makeup.new === 0;
       setAllCaughtUp(isCaughtUp);
 
       if (isCaughtUp && !allowExtraPractice) {
@@ -115,6 +118,7 @@ function PracticeContent() {
             difficulties: diff ? [diff] : undefined,
             tags,
             sessionSize,
+            includeNew: mode !== "due",
             allowExtraPractice: true,
             seed,
           })
@@ -126,9 +130,26 @@ function PracticeContent() {
     };
 
     loadSession();
-  }, [isReady, repository, lang, diff, tags, sessionSize, allowExtraPractice]);
+  }, [isReady, repository, lang, diff, tags, sessionSize, allowExtraPractice, mode]);
 
   const currentQuestion = questions[currentIndex];
+
+  const handleSkip = () => {
+    if (!currentQuestion) return;
+    if (questions.length <= 1) return;
+    setQuestions((prev) => {
+      const q = prev[currentIndex];
+      if (!q) return prev;
+      const next = [...prev];
+      next.splice(currentIndex, 1);
+      next.push(q);
+      return next;
+    });
+    // Keep index stable; next question becomes whatever shifted into this slot.
+    setIsRevealed(false);
+    window.scrollTo(0, 0);
+    setReviewToast({ title: "Skipped (moved to end)" });
+  };
 
   const handleEvaluation = async (evalType: Evaluation) => {
     if (!currentQuestion) return;
@@ -197,6 +218,12 @@ function PracticeContent() {
         return;
       }
 
+      if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        handleSkip();
+        return;
+      }
+
       if (!isRevealed) {
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault();
@@ -254,7 +281,9 @@ function PracticeContent() {
         </h2>
         <p className="text-gray-500 dark:text-gray-400 mb-8">
           {allCaughtUp
-            ? "You have no due reviews and no new questions for this selection."
+            ? mode === "due"
+              ? "You have no due reviews for this selection."
+              : "You have no due reviews and no new questions for this selection."
             : "Try changing the filters or language."}
         </p>
         {allCaughtUp && (
@@ -265,6 +294,7 @@ function PracticeContent() {
               if (diff) params.set("diff", diff);
               if (tags?.length) params.set("tags", tags.join(","));
               params.set("len", String(sessionSize));
+              if (mode === "due") params.set("mode", "due");
               params.set("extra", "1");
               return params.toString();
             })()}`}
@@ -343,6 +373,11 @@ function PracticeContent() {
               <span className="text-[10px] font-black bg-gray-100 dark:bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded uppercase">
                 {currentQuestion.difficulty}
               </span>
+              {mode === "due" ? (
+                <span className="text-[10px] font-black bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 px-1.5 py-0.5 rounded uppercase">
+                  due-only
+                </span>
+              ) : null}
               {makeup ? (
                 <span className="text-[10px] font-black bg-gray-50 dark:bg-gray-800/70 text-gray-500 px-1.5 py-0.5 rounded uppercase">
                   {makeup.due} due / {makeup.new} new{makeup.extra ? ` / ${makeup.extra} extra` : ""}
@@ -595,6 +630,13 @@ function PracticeContent() {
               </div>
 
               <div className="flex items-center justify-between gap-4">
+                <span>Skip (move to end)</span>
+                <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                  S
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
                 <span>Grade: Fail</span>
                 <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
                   1
@@ -637,13 +679,31 @@ function PracticeContent() {
       <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 z-20 shadow-lg">
         <div className="max-w-3xl mx-auto">
           {!isRevealed ? (
-            <button
-              onClick={() => setIsRevealed(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-5 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] text-xl flex items-center justify-center gap-3"
-              aria-label="Show the answer"
-            >
-              <Brain size={24} /> Show Answer
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                onClick={() => setIsRevealed(true)}
+                className="sm:col-span-2 w-full bg-blue-600 hover:bg-blue-700 text-white py-5 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] text-xl flex items-center justify-center gap-3"
+                aria-label="Show the answer"
+              >
+                <Brain size={24} /> Show Answer
+              </button>
+              <button
+                type="button"
+                onClick={handleSkip}
+                disabled={questions.length <= 1}
+                className={`w-full py-5 rounded-2xl font-black transition-all active:scale-[0.98] border ${
+                  questions.length <= 1
+                    ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-800 text-gray-400"
+                    : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                }`}
+                aria-label="Skip this question"
+              >
+                Skip
+                <span className="ml-2 text-[10px] font-mono font-black text-gray-400">
+                  S
+                </span>
+              </button>
+            </div>
           ) : (
             <div className="flex flex-col gap-4">
               <p className="text-center text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">

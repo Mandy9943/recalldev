@@ -1,6 +1,7 @@
 "use client";
 
 import { useInterview } from "@/context/InterviewContext";
+import { readPrefs } from "@/lib/prefs";
 import { Question, UserAnalytics } from "@/types";
 import {
   AlertTriangle,
@@ -16,46 +17,21 @@ import {
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-type RecallDevPrefs = {
-  lang?: string;
-  diff?: string;
-  tags?: string[];
-  len?: number;
-};
-
-function getPrefsFromStorage(): RecallDevPrefs | null {
-  try {
-    const raw = localStorage.getItem("recall_dev_v2_prefs");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const p = parsed as any;
-    const out: RecallDevPrefs = {};
-    if (typeof p.lang === "string") out.lang = p.lang;
-    if (typeof p.diff === "string") out.diff = p.diff;
-    if (Array.isArray(p.tags) && p.tags.every((t: unknown) => typeof t === "string")) {
-      out.tags = p.tags;
-    }
-    if (typeof p.len === "number" && Number.isFinite(p.len)) out.len = p.len;
-    return out;
-  } catch {
-    return null;
-  }
-}
-
 function buildPracticeHref(input: {
   tags?: string[];
 }): string {
   const params = new URLSearchParams();
-  const prefs = getPrefsFromStorage();
+  const prefs = readPrefs();
   const lang = prefs?.lang;
   const diff = prefs?.diff;
   const len = prefs?.len;
+  const mode = prefs?.mode;
 
   if (lang) params.set("lang", lang);
   if (diff) params.set("diff", diff);
   if (input.tags?.length) params.set("tags", input.tags.join(","));
   if (len) params.set("len", String(len));
+  if (mode === "due") params.set("mode", "due");
 
   const qs = params.toString();
   return qs ? `/practice?${qs}` : "/practice";

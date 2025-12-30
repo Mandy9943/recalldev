@@ -2,6 +2,7 @@
 
 import { useInterview } from "@/context/InterviewContext";
 import { Difficulty, ProgrammingLanguage } from "@/types";
+import { readPrefs, writePrefs } from "@/lib/prefs";
 import {
   BarChart3,
   BrainCircuit,
@@ -13,41 +14,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-
-type RecallDevPrefs = {
-  lang?: ProgrammingLanguage;
-  diff?: Difficulty;
-  tags?: string[];
-  len?: number;
-};
-
-function readPrefs(): RecallDevPrefs | null {
-  try {
-    const raw = localStorage.getItem("recall_dev_v2_prefs");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const p = parsed as any;
-    const out: RecallDevPrefs = {};
-    if (typeof p.lang === "string") out.lang = p.lang as ProgrammingLanguage;
-    if (typeof p.diff === "string") out.diff = p.diff as Difficulty;
-    if (Array.isArray(p.tags) && p.tags.every((t: unknown) => typeof t === "string")) {
-      out.tags = p.tags as string[];
-    }
-    if (typeof p.len === "number" && Number.isFinite(p.len)) out.len = p.len as number;
-    return out;
-  } catch {
-    return null;
-  }
-}
-
-function writePrefs(prefs: RecallDevPrefs) {
-  try {
-    localStorage.setItem("recall_dev_v2_prefs", JSON.stringify(prefs));
-  } catch {
-    // ignore
-  }
-}
 
 export function HomeClient() {
   const { repository, stats, isReady } = useInterview();
@@ -69,6 +35,10 @@ export function HomeClient() {
     const n = readPrefs()?.len ?? 10;
     return Number.isFinite(n) ? Math.max(1, Math.min(50, Math.trunc(n))) : 10;
   });
+  const [sessionMode, setSessionMode] = useState<"mix" | "due">(() => {
+    if (typeof window === "undefined") return "mix";
+    return readPrefs()?.mode ?? "mix";
+  });
 
   const [availableLanguages, setAvailableLanguages] = useState<
     ProgrammingLanguage[]
@@ -82,6 +52,7 @@ export function HomeClient() {
     if (typeof window === "undefined") return [];
     return readPrefs()?.tags ?? [];
   });
+  const [tagQuery, setTagQuery] = useState("");
   const [dueCount, setDueCount] = useState(0);
   const [newCount, setNewCount] = useState(0);
 
@@ -93,8 +64,9 @@ export function HomeClient() {
       diff: selectedDifficulty,
       tags: selectedTags,
       len: sessionLength,
+      mode: sessionMode,
     });
-  }, [isReady, selectedLanguage, selectedDifficulty, selectedTags, sessionLength]);
+  }, [isReady, selectedLanguage, selectedDifficulty, selectedTags, sessionLength, sessionMode]);
 
   // Load available metadata (Languages & Difficulties) from ALL questions on mount
   useEffect(() => {
@@ -183,14 +155,21 @@ export function HomeClient() {
     );
   };
 
+  const filteredTags = useMemo(() => {
+    const q = tagQuery.trim().toLowerCase();
+    if (!q) return availableTags;
+    return availableTags.filter((t) => t.toLowerCase().includes(q));
+  }, [availableTags, tagQuery]);
+
   const startSessionUrl = useMemo(() => {
     const params = new URLSearchParams();
     params.set("lang", selectedLanguage);
     params.set("diff", selectedDifficulty);
     if (selectedTags.length) params.set("tags", selectedTags.join(","));
     params.set("len", String(sessionLength));
+    if (sessionMode === "due") params.set("mode", "due");
     return `/practice?${params.toString()}`;
-  }, [selectedLanguage, selectedDifficulty, selectedTags, sessionLength]);
+  }, [selectedLanguage, selectedDifficulty, selectedTags, sessionLength, sessionMode]);
 
   // Important for SEO: `/` is now server-rendered. This is only the interactive dashboard.
   if (!isReady) {
@@ -302,9 +281,56 @@ export function HomeClient() {
             <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
               <Layers size={16} /> Topics (Optional)
             </label>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                <div className="flex-1">
+                  <input
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.currentTarget.value)}
+                    placeholder="Search topics…"
+                    className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    aria-label="Search topics"
+                  />
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags([])}
+                    disabled={selectedTags.length === 0}
+                    className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                      selectedTags.length === 0
+                        ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
+                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    Clear
+                  </button>
+                  {availableTags.length > 0 && availableTags.length <= 60 ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTags(availableTags)}
+                      disabled={selectedTags.length === availableTags.length}
+                      className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                        selectedTags.length === availableTags.length
+                          ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
+                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      All
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {selectedTags.length ? (
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                  {selectedTags.length} selected
+                </p>
+              ) : null}
+            </div>
             <div className="flex flex-wrap gap-2">
               {availableTags.length > 0 ? (
-                availableTags.map((tag) => (
+                filteredTags.length > 0 ? (
+                  filteredTags.map((tag) => (
                   <button
                     key={tag}
                     onClick={() => toggleTag(tag)}
@@ -316,7 +342,12 @@ export function HomeClient() {
                   >
                     {tag}
                   </button>
-                ))
+                  ))
+                ) : (
+                  <span className="text-xs text-gray-400 italic">
+                    No topics match “{tagQuery.trim()}”.
+                  </span>
+                )
               ) : (
                 <span className="text-xs text-gray-400 italic">
                   No topics found for this selection.
@@ -344,6 +375,39 @@ export function HomeClient() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="space-y-4">
+            <label className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">
+              <Play size={16} /> Session Mode
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSessionMode("mix")}
+                className={`px-4 py-2 rounded-xl font-bold transition-all ${
+                  sessionMode === "mix"
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none"
+                    : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
+                }`}
+              >
+                Due + New
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionMode("due")}
+                className={`px-4 py-2 rounded-xl font-bold transition-all ${
+                  sessionMode === "due"
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none"
+                    : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
+                }`}
+              >
+                Due-only
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Due-only sessions contain only questions scheduled for review. You can opt into extra practice when you’re caught up.
+            </p>
           </div>
         </section>
       </main>

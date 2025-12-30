@@ -7,6 +7,11 @@ export type SessionBuildInput = {
   tags?: string[];
   sessionSize: number;
   /**
+   * If true, include unseen/new questions after due ones.
+   * If false, the session will contain due questions only (unless allowExtraPractice is enabled).
+   */
+  includeNew?: boolean;
+  /**
    * If true, allow adding not-due questions after due+new are exhausted.
    * This is meant to be explicit opt-in when the user is "all caught up".
    */
@@ -85,6 +90,7 @@ export async function buildPracticeSession(
   input: SessionBuildInput
 ): Promise<SessionBuildResult> {
   const sessionSize = clampInt(input.sessionSize, 1, 50);
+  const includeNew = input.includeNew ?? true;
   const seed =
     input.seed ??
     sessionSeedForToday({
@@ -105,7 +111,7 @@ export async function buildPracticeSession(
 
   const remainingAfterDue = Math.max(0, sessionSize - duePicked.length);
   const unseen =
-    remainingAfterDue > 0
+    includeNew && remainingAfterDue > 0
       ? await input.repository.getNewQuestions({
           languages: input.languages as any,
           difficulties: input.difficulties as any,
