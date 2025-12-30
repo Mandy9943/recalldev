@@ -8,6 +8,13 @@ import {
   formatNextReviewIn,
 } from "@/lib/srs";
 import {
+  addReport,
+  readUserMeta,
+  setMyAnswer,
+  setNotes,
+  toggleBookmark,
+} from "@/lib/userMeta";
+import {
   Difficulty,
   Evaluation,
   ProgrammingLanguage,
@@ -17,12 +24,16 @@ import {
 import {
   AlertCircle,
   ArrowLeft,
+  Bookmark,
   Brain,
   CheckCircle2,
+  Copy,
+  Flag,
   History,
   Home,
   Info,
   Keyboard,
+  ListOrdered,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -38,6 +49,10 @@ import React, {
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+function promptTitle(q: Question): string {
+  return (q.question || "").replace(/\s+/g, " ").trim();
+}
 
 function PracticeContent() {
   const searchParams = useSearchParams();
@@ -93,6 +108,29 @@ function PracticeContent() {
     title: string;
     detail?: string;
   } | null>(null);
+
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportNote, setReportNote] = useState("");
+
+  const [myAnswerById, setMyAnswerById] = useState<Record<string, string>>({});
+  const [notesById, setNotesById] = useState<Record<string, string>>({});
+  const [bookmarksById, setBookmarksById] = useState<Record<string, boolean>>(
+    {}
+  );
+  const persistTimersRef = useRef<Record<string, number>>({});
+
+  const [weakTags, setWeakTags] = useState<string[]>([]);
+  const [isLoadingWeakTags, setIsLoadingWeakTags] = useState(false);
+
+  // Load local per-question metadata once.
+  useEffect(() => {
+    const meta = readUserMeta();
+    setMyAnswerById(meta.myAnswerById || {});
+    setNotesById(meta.notesById || {});
+    setBookmarksById(meta.bookmarksById || {});
+  }, []);
 
   // Auto-hide toast after grading.
   useEffect(() => {
@@ -194,6 +232,73 @@ function PracticeContent() {
     setShowAllTags(false);
   }, [currentQuestion?.id]);
 
+  const bucketForIndex = useCallback(
+    (i: number): "Due" | "New" | "Extra" => {
+      const dueN = makeup?.due ?? 0;
+      const newN = makeup?.new ?? 0;
+      if (i < dueN) return "Due";
+      if (i < dueN + newN) return "New";
+      return "Extra";
+    },
+    [makeup?.due, makeup?.new]
+  );
+
+  const buildPracticeHref = useCallback(
+    (input: {
+      tagsOverride?: string[];
+      forceModeMix?: boolean;
+      extra?: boolean;
+    }) => {
+      const params = new URLSearchParams();
+      if (lang) params.set("lang", lang);
+      if (diff) params.set("diff", diff);
+      const tagsToUse = input.tagsOverride ?? tags ?? [];
+      if (tagsToUse.length) params.set("tags", tagsToUse.join(","));
+      params.set("len", String(sessionSize));
+      const modeToUse = input.forceModeMix
+        ? "mix"
+        : mode === "due"
+        ? "due"
+        : "mix";
+      if (modeToUse === "due") params.set("mode", "due");
+      if (input.extra) params.set("extra", "1");
+      return `/practice?${params.toString()}`;
+    },
+    [diff, lang, mode, sessionSize, tags]
+  );
+
+  // When caught up (no questions), compute “weakest tags” to offer a targeted CTA.
+  useEffect(() => {
+    if (!isReady) return;
+    if (!allCaughtUp) return;
+    if (questions.length !== 0) return;
+    if (isLoadingWeakTags) return;
+    if (weakTags.length > 0) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setIsLoadingWeakTags(true);
+        const a = await repository.getAnalytics({ days: 14, topN: 3 });
+        if (cancelled) return;
+        const t = a.topWeakTags.map((x) => x.tag).filter(Boolean);
+        setWeakTags(t);
+      } finally {
+        if (!cancelled) setIsLoadingWeakTags(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    allCaughtUp,
+    isLoadingWeakTags,
+    isReady,
+    questions.length,
+    repository,
+    weakTags.length,
+  ]);
+
   const handleSkip = useCallback(() => {
     if (!currentQuestion) return;
     if (questions.length <= 1) return;
@@ -210,6 +315,104 @@ function PracticeContent() {
     window.scrollTo(0, 0);
     setReviewToast({ title: "Skipped (moved to end)" });
   }, [currentQuestion, currentIndex, questions.length]);
+
+  const schedulePersist = useCallback((key: string, fn: () => void) => {
+    const prev = persistTimersRef.current[key];
+    if (prev) window.clearTimeout(prev);
+    const t = window.setTimeout(() => {
+      delete persistTimersRef.current[key];
+      fn();
+    }, 350);
+    persistTimersRef.current[key] = t;
+  }, []);
+
+  const handleMyAnswerChange = useCallback(
+    (questionId: string, text: string) => {
+      setMyAnswerById((prev) => ({ ...prev, [questionId]: text }));
+      schedulePersist(`myAnswer:${questionId}`, () =>
+        setMyAnswer(questionId, text)
+      );
+    },
+    [schedulePersist]
+  );
+
+  const handleNotesChange = useCallback(
+    (questionId: string, text: string) => {
+      setNotesById((prev) => ({ ...prev, [questionId]: text }));
+      schedulePersist(`notes:${questionId}`, () => setNotes(questionId, text));
+    },
+    [schedulePersist]
+  );
+
+  const handleToggleBookmark = useCallback(() => {
+    if (!currentQuestion) return;
+    const next = toggleBookmark(currentQuestion.id);
+    setBookmarksById((prev) => ({ ...prev, [currentQuestion.id]: next }));
+    setReviewToast({ title: next ? "Bookmarked" : "Bookmark removed" });
+  }, [currentQuestion]);
+
+  const buildReportMarkdown = useCallback(
+    (q: Question, reason?: string, note?: string) => {
+      const title = promptTitle(q).slice(0, 140);
+      const tagLine = q.tags?.length
+        ? q.tags.map((t) => `#${t}`).join(" ")
+        : "";
+      return [
+        `### RecallDev question report`,
+        ``,
+        `- id: \`${q.id}\``,
+        `- language: ${q.language}`,
+        `- difficulty: ${q.difficulty}`,
+        tagLine ? `- tags: ${tagLine}` : undefined,
+        reason ? `- reason: ${reason}` : undefined,
+        note ? `- note: ${note}` : undefined,
+        ``,
+        `#### Prompt (excerpt)`,
+        ``,
+        `> ${title}`,
+        ``,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+    []
+  );
+
+  const submitReport = useCallback(
+    async (opts: { alsoCopy?: boolean }) => {
+      if (!currentQuestion) return;
+      const report = addReport({
+        questionId: currentQuestion.id,
+        reason: reportReason,
+        note: reportNote,
+      });
+      setIsReportOpen(false);
+      setReportReason("");
+      setReportNote("");
+      setReviewToast({
+        title: "Report saved locally",
+        detail: `Saved at ${new Date(report.ts).toLocaleString()}`,
+      });
+
+      if (opts.alsoCopy) {
+        try {
+          const md = buildReportMarkdown(
+            currentQuestion,
+            reportReason,
+            reportNote
+          );
+          await navigator.clipboard.writeText(md);
+          setReviewToast({ title: "Copied report to clipboard" });
+        } catch {
+          setReviewToast({
+            title: "Saved report locally",
+            detail: "Clipboard copy failed in this browser.",
+          });
+        }
+      }
+    },
+    [buildReportMarkdown, currentQuestion, reportNote, reportReason]
+  );
 
   const goPrev = () => {
     if (currentIndex <= 0) return;
@@ -441,23 +644,37 @@ function PracticeContent() {
               : "You have no due reviews and no new questions for this selection."
             : "Try changing the filters or language."}
         </p>
-        {allCaughtUp && (
-          <Link
-            href={`/practice?${(() => {
-              const params = new URLSearchParams();
-              if (lang) params.set("lang", lang);
-              if (diff) params.set("diff", diff);
-              if (tags?.length) params.set("tags", tags.join(","));
-              params.set("len", String(sessionSize));
-              if (mode === "due") params.set("mode", "due");
-              params.set("extra", "1");
-              return params.toString();
-            })()}`}
-            className="w-full max-w-sm bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all flex items-center justify-center gap-2 mb-4"
-          >
-            Practice anyway (extra)
-          </Link>
-        )}
+        {allCaughtUp ? (
+          <div className="w-full max-w-sm space-y-3 mb-4">
+            <Link
+              href={buildPracticeHref({
+                extra: true,
+                forceModeMix: true,
+              })}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all flex items-center justify-center gap-2"
+            >
+              Mixed exam test
+            </Link>
+            <Link
+              href={buildPracticeHref({
+                extra: true,
+                forceModeMix: true,
+                tagsOverride: weakTags.length ? weakTags : undefined,
+              })}
+              className={`w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 ${
+                isLoadingWeakTags ? "opacity-70 pointer-events-none" : ""
+              }`}
+            >
+              Practice weakest topics
+            </Link>
+            <Link
+              href={buildPracticeHref({ extra: true })}
+              className="w-full text-blue-600 dark:text-blue-400 py-3 rounded-2xl font-black transition-all flex items-center justify-center"
+            >
+              Practice anyway (extra)
+            </Link>
+          </div>
+        ) : null}
         <Link
           href="/"
           className="text-blue-600 dark:text-blue-400 font-bold flex items-center gap-2"
@@ -532,9 +749,43 @@ function PracticeContent() {
             <span className="text-sm font-bold text-gray-800 dark:text-gray-100">
               Question {currentIndex + 1} of {questions.length}
             </span>
+            {makeup ? (
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                {makeup.due} due • {makeup.new} new
+                {makeup.extra ? ` • ${makeup.extra} extra` : ""}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2 text-gray-400">
+          <button
+            type="button"
+            onClick={() => setIsQueueOpen(true)}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            aria-label="View queue"
+          >
+            <ListOrdered size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={handleToggleBookmark}
+            className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+              currentQuestion && bookmarksById[currentQuestion.id]
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            }`}
+            aria-label="Bookmark question"
+          >
+            <Bookmark size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsReportOpen(true)}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            aria-label="Report issue"
+          >
+            <Flag size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setShowSessionInfo(true)}
@@ -650,8 +901,70 @@ function PracticeContent() {
           </div>
 
           <div className="">
+            {!isRevealed && currentQuestion ? (
+              <div className="mt-6 bg-white dark:bg-gray-800 p-5 md:p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                <p className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                  Type your answer (optional)
+                </p>
+                <textarea
+                  value={myAnswerById[currentQuestion.id] ?? ""}
+                  onChange={(e) =>
+                    handleMyAnswerChange(
+                      currentQuestion.id,
+                      e.currentTarget.value
+                    )
+                  }
+                  placeholder="Write what you’d say in an interview…"
+                  className="mt-3 w-full min-h-[120px] px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+                <p className="mt-2 text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                  Tip: keep it brief. After reveal, you’ll write what you
+                  missed.
+                </p>
+              </div>
+            ) : null}
             {isRevealed && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
+                {currentQuestion ? (
+                  <div className="bg-white dark:bg-gray-800 p-5 md:p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm space-y-5">
+                    <div>
+                      <p className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                        My answer
+                      </p>
+                      <textarea
+                        value={myAnswerById[currentQuestion.id] ?? ""}
+                        onChange={(e) =>
+                          handleMyAnswerChange(
+                            currentQuestion.id,
+                            e.currentTarget.value
+                          )
+                        }
+                        placeholder="(optional) What did you say before reveal?"
+                        className="mt-3 w-full min-h-[110px] px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-blue-500 dark:text-blue-400 uppercase tracking-widest">
+                        What did you miss?
+                      </p>
+                      <textarea
+                        value={notesById[currentQuestion.id] ?? ""}
+                        onChange={(e) =>
+                          handleNotesChange(
+                            currentQuestion.id,
+                            e.currentTarget.value
+                          )
+                        }
+                        placeholder="Capture the delta: missing concepts, wrong assumptions, details to drill…"
+                        className="mt-3 w-full min-h-[110px] px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      />
+                      <p className="mt-2 text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                        This note is saved locally per question (and included in
+                        backups).
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <h4 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">
                     Short Answer
@@ -945,6 +1258,192 @@ function PracticeContent() {
               Tip: shortcuts work best on desktop. On mobile, the buttons are
               the fastest path.
             </p>
+          </div>
+        </div>
+      )}
+
+      {isQueueOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Queue"
+          onMouseDown={() => setIsQueueOpen(false)}
+        >
+          <div
+            className="fixed inset-x-0 bottom-0 max-h-[85vh] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 rounded-t-3xl shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                    Session
+                  </p>
+                  <h3 className="mt-1 text-lg font-black text-gray-900 dark:text-white">
+                    View queue
+                  </h3>
+                  {makeup ? (
+                    <p className="mt-1 text-xs font-bold text-gray-500 dark:text-gray-400">
+                      {makeup.due} due • {makeup.new} new
+                      {makeup.extra ? ` • ${makeup.extra} extra` : ""}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsQueueOpen(false)}
+                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto max-h-[calc(85vh-110px)]">
+              <div className="space-y-2">
+                {questions.map((q, i) => {
+                  const bucket = bucketForIndex(i);
+                  const isCurrent = i === currentIndex;
+                  const isRev = Boolean(revealedById[q.id]);
+                  const graded = Boolean(evaluationById[q.id]);
+                  const title = promptTitle(q);
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => {
+                        setCurrentIndex(i);
+                        setIsQueueOpen(false);
+                        window.scrollTo(0, 0);
+                      }}
+                      className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                        isCurrent
+                          ? "border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/40"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-black bg-gray-100 dark:bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded uppercase">
+                              {bucket}
+                            </span>
+                            {bookmarksById[q.id] ? (
+                              <span className="text-[10px] font-black bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded uppercase">
+                                Bookmarked
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="text-sm font-bold text-gray-900 dark:text-white truncate">
+                            {i + 1}. {title || q.id}
+                          </p>
+                          <p className="mt-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                            {isRev ? "Revealed" : "Hidden"}
+                            {graded ? " • Graded" : ""}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <span className="text-[10px] font-black bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded uppercase">
+                            {q.language}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isReportOpen && currentQuestion && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm p-4 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Report issue"
+          onMouseDown={() => setIsReportOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl p-6"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Question
+                </p>
+                <h2 className="mt-1 text-lg font-black text-gray-900 dark:text-white">
+                  Report issue
+                </h2>
+                <p className="mt-1 text-xs font-bold text-gray-500 dark:text-gray-400">
+                  Saved locally (and included in backups).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReportOpen(false)}
+                className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                aria-label="Close report issue"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Reason
+                </label>
+                <select
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.currentTarget.value)}
+                  className="mt-2 w-full px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                >
+                  <option value="">Select…</option>
+                  <option value="Wrong/incorrect answer">
+                    Wrong/incorrect answer
+                  </option>
+                  <option value="Unclear prompt">Unclear prompt</option>
+                  <option value="Missing key point">Missing key point</option>
+                  <option value="Tag/difficulty mismatch">
+                    Tag/difficulty mismatch
+                  </option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={reportNote}
+                  onChange={(e) => setReportNote(e.currentTarget.value)}
+                  placeholder="What’s wrong or how should it be improved?"
+                  className="mt-2 w-full min-h-[120px] px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => submitReport({ alsoCopy: false })}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl font-black transition-all active:scale-[0.98]"
+              >
+                Save report
+              </button>
+              <button
+                type="button"
+                onClick={() => submitReport({ alsoCopy: true })}
+                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 py-3 rounded-2xl font-black transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              >
+                <Copy size={16} /> Save & copy
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -9,6 +9,21 @@ export interface EvaluationEvent {
   evaluation: Evaluation;
 }
 
+export interface QuestionReport {
+  questionId: string;
+  ts: number; // timestamp (ms)
+  reason?: string;
+  note?: string;
+}
+
+export interface UserMeta {
+  version: 1;
+  myAnswerById: Record<string, string>;
+  notesById: Record<string, string>;
+  bookmarksById: Record<string, boolean>;
+  reports: QuestionReport[];
+}
+
 export interface Question {
   id: string;
   language: ProgrammingLanguage;

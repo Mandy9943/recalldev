@@ -109,6 +109,7 @@ export default function ProgressPage() {
       const rawProgress = localStorage.getItem("recall_dev_v2_progress");
       const rawQuestions = localStorage.getItem("recall_dev_v2_questions");
       const rawPrefs = localStorage.getItem("recall_dev_v2_prefs");
+      const rawUserMeta = localStorage.getItem("recall_dev_v2_user_meta");
 
       const backup = {
         app: "RecallDev",
@@ -118,6 +119,7 @@ export default function ProgressPage() {
           progress: rawProgress ? (JSON.parse(rawProgress) as unknown) : null,
           questions: rawQuestions ? (JSON.parse(rawQuestions) as unknown) : null,
           prefs: rawPrefs ? (JSON.parse(rawPrefs) as unknown) : null,
+          userMeta: rawUserMeta ? (JSON.parse(rawUserMeta) as unknown) : null,
         },
       };
 
@@ -173,12 +175,14 @@ export default function ProgressPage() {
       const nextProgress = data?.progress;
       const nextQuestions = data?.questions;
       const nextPrefs = data?.prefs;
+      const nextUserMeta = data?.userMeta;
 
       const hasProgress = nextProgress && typeof nextProgress === "object";
       const hasQuestions = looksLikeQuestions(nextQuestions);
       const hasPrefs = nextPrefs && typeof nextPrefs === "object";
+      const hasUserMeta = nextUserMeta && typeof nextUserMeta === "object";
 
-      if (!hasProgress && !hasQuestions && !hasPrefs) {
+      if (!hasProgress && !hasQuestions && !hasPrefs && !hasUserMeta) {
         setDataMessage("Import failed: no recognizable RecallDev data found.");
         return;
       }
@@ -205,6 +209,12 @@ export default function ProgressPage() {
       }
       if (hasPrefs) {
         localStorage.setItem("recall_dev_v2_prefs", JSON.stringify(nextPrefs));
+      }
+      if (hasUserMeta) {
+        localStorage.setItem(
+          "recall_dev_v2_user_meta",
+          JSON.stringify(nextUserMeta)
+        );
       }
 
       await repository.refreshFromStorage();
