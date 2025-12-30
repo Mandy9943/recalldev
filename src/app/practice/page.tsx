@@ -11,8 +11,8 @@ import {
   CheckCircle2,
   History,
   Home,
+  Info,
   Keyboard,
-  Timer,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -55,6 +55,8 @@ function PracticeContent() {
   const [makeup, setMakeup] = useState<{ due: number; new: number; extra: number } | null>(null);
   const [allCaughtUp, setAllCaughtUp] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showSessionInfo, setShowSessionInfo] = useState(false);
+  const [showAllTags, setShowAllTags] = useState(false);
   const [reviewToast, setReviewToast] = useState<{
     title: string;
     detail?: string;
@@ -133,6 +135,11 @@ function PracticeContent() {
   }, [isReady, repository, lang, diff, tags, sessionSize, allowExtraPractice, mode]);
 
   const currentQuestion = questions[currentIndex];
+
+  // Reset small UI toggles per question to reduce visual noise.
+  useEffect(() => {
+    setShowAllTags(false);
+  }, [currentQuestion?.id]);
 
   const handleSkip = () => {
     if (!currentQuestion) return;
@@ -373,16 +380,6 @@ function PracticeContent() {
               <span className="text-[10px] font-black bg-gray-100 dark:bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded uppercase">
                 {currentQuestion.difficulty}
               </span>
-              {mode === "due" ? (
-                <span className="text-[10px] font-black bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 px-1.5 py-0.5 rounded uppercase">
-                  due-only
-                </span>
-              ) : null}
-              {makeup ? (
-                <span className="text-[10px] font-black bg-gray-50 dark:bg-gray-800/70 text-gray-500 px-1.5 py-0.5 rounded uppercase">
-                  {makeup.due} due / {makeup.new} new{makeup.extra ? ` / ${makeup.extra} extra` : ""}
-                </span>
-              ) : null}
             </div>
             <span className="text-sm font-bold text-gray-800 dark:text-gray-100">
               Question {currentIndex + 1} of {questions.length}
@@ -392,16 +389,20 @@ function PracticeContent() {
         <div className="flex items-center gap-2 text-gray-400">
           <button
             type="button"
+            onClick={() => setShowSessionInfo(true)}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            aria-label="Session info"
+          >
+            <Info size={16} />
+          </button>
+          <button
+            type="button"
             onClick={() => setShowShortcuts(true)}
-            className="p-2 -mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
             aria-label="Keyboard shortcuts"
           >
             <Keyboard size={16} />
           </button>
-          <div className="flex items-center gap-1">
-            <Timer size={14} />
-            <span className="text-xs font-mono font-bold">{questions.length}Q</span>
-          </div>
         </div>
       </header>
 
@@ -470,7 +471,7 @@ function PracticeContent() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              {currentQuestion.tags.map((tag) => (
+              {(showAllTags ? currentQuestion.tags : currentQuestion.tags.slice(0, 3)).map((tag) => (
                 <span
                   key={tag}
                   className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"
@@ -478,6 +479,16 @@ function PracticeContent() {
                   #{tag}
                 </span>
               ))}
+              {currentQuestion.tags.length > 3 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTags((v) => !v)}
+                  className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-2 py-1 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  aria-label={showAllTags ? "Collapse tags" : `Show ${currentQuestion.tags.length - 3} more tags`}
+                >
+                  {showAllTags ? "Less" : `+${currentQuestion.tags.length - 3} more`}
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -584,6 +595,91 @@ function PracticeContent() {
           </div>
         </div>
       </main>
+
+      {showSessionInfo && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm p-4 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Session info"
+          onMouseDown={() => setShowSessionInfo(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl p-6"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                  Practice
+                </p>
+                <h2 className="mt-1 text-lg font-black text-gray-900 dark:text-white">
+                  Session info
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSessionInfo(false)}
+                className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                aria-label="Close session info"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3 text-sm text-gray-700 dark:text-gray-200">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-500 dark:text-gray-400 font-bold">Mode</span>
+                <span className="font-black">{mode === "due" ? "Due only" : "Due + new"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-500 dark:text-gray-400 font-bold">Length</span>
+                <span className="font-black">{sessionSize} questions</span>
+              </div>
+              {makeup ? (
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500 dark:text-gray-400 font-bold">Pool</span>
+                  <span className="font-black">
+                    {makeup.due} due • {makeup.new} new{makeup.extra ? ` • ${makeup.extra} extra` : ""}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-500 dark:text-gray-400 font-bold">Extra practice</span>
+                <span className="font-black">{allowExtraPractice ? "On" : "Off"}</span>
+              </div>
+
+              {(lang || diff || (tags?.length ?? 0) > 0) ? (
+                <div className="pt-3 mt-3 border-t border-gray-200 dark:border-gray-800 space-y-2">
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                    Filters
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {lang ? (
+                      <span className="text-[10px] font-black bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded uppercase">
+                        {lang}
+                      </span>
+                    ) : null}
+                    {diff ? (
+                      <span className="text-[10px] font-black bg-gray-100 dark:bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded uppercase">
+                        {diff}
+                      </span>
+                    ) : null}
+                    {(tags ?? []).map((t) => (
+                      <span
+                        key={t}
+                        className="text-[10px] font-black bg-gray-50 dark:bg-gray-800/70 text-gray-500 px-1.5 py-0.5 rounded uppercase"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showShortcuts && (
         <div
