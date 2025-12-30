@@ -236,6 +236,19 @@ export class LocalRepository implements IDataRepository {
     this.saveProgress();
   }
 
+  async setRecord(
+    questionId: string,
+    record: UserQuestionRecord | null
+  ): Promise<void> {
+    if (!record) {
+      delete this.progress[questionId];
+      this.saveProgress();
+      return;
+    }
+    this.progress[questionId] = record;
+    this.saveProgress();
+  }
+
   async getStats(): Promise<UserStats> {
     const records = Object.values(this.progress);
     const seenCount = records.length;

@@ -53,6 +53,7 @@ export function HomeClient() {
     return readPrefs()?.tags ?? [];
   });
   const [tagQuery, setTagQuery] = useState("");
+  const [isTopicPickerOpen, setIsTopicPickerOpen] = useState(false);
   const [dueCount, setDueCount] = useState(0);
   const [newCount, setNewCount] = useState(0);
 
@@ -160,6 +161,16 @@ export function HomeClient() {
     if (!q) return availableTags;
     return availableTags.filter((t) => t.toLowerCase().includes(q));
   }, [availableTags, tagQuery]);
+
+  // Close topic picker on Esc.
+  useEffect(() => {
+    if (!isTopicPickerOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsTopicPickerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isTopicPickerOpen]);
 
   const startSessionUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -282,77 +293,46 @@ export function HomeClient() {
               <Layers size={16} /> Topics (Optional)
             </label>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-                <div className="flex-1">
-                  <input
-                    value={tagQuery}
-                    onChange={(e) => setTagQuery(e.currentTarget.value)}
-                    placeholder="Search topics…"
-                    className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                    aria-label="Search topics"
-                  />
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTags([])}
-                    disabled={selectedTags.length === 0}
-                    className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
-                      selectedTags.length === 0
-                        ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
-                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    Clear
-                  </button>
-                  {availableTags.length > 0 && availableTags.length <= 60 ? (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTags(availableTags)}
-                      disabled={selectedTags.length === availableTags.length}
-                      className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
-                        selectedTags.length === availableTags.length
-                          ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
-                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                      }`}
-                    >
-                      All
-                    </button>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                    {selectedTags.length ? `${selectedTags.length} selected` : "All topics"}
+                  </span>
+                  {selectedTags.length ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedTags.slice(0, 5).map((t) => (
+                        <span
+                          key={t}
+                          className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-700"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                      {selectedTags.length > 5 ? (
+                        <span className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-gray-100 dark:bg-gray-800 text-gray-500 border border-gray-200 dark:border-gray-700">
+                          +{selectedTags.length - 5} more
+                        </span>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsTopicPickerOpen(true)}
+                  className="shrink-0 px-4 py-3 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-black hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
+                >
+                  Choose topics
+                </button>
               </div>
               {selectedTags.length ? (
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                  {selectedTags.length} selected
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags([])}
+                  className="self-start px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Clear topics
+                </button>
               ) : null}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {availableTags.length > 0 ? (
-                filteredTags.length > 0 ? (
-                  filteredTags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => toggleTag(tag)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      selectedTags.includes(tag)
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400"
-                        : "bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
-                    }`}
-                  >
-                    {tag}
-                  </button>
-                  ))
-                ) : (
-                  <span className="text-xs text-gray-400 italic">
-                    No topics match “{tagQuery.trim()}”.
-                  </span>
-                )
-              ) : (
-                <span className="text-xs text-gray-400 italic">
-                  No topics found for this selection.
-                </span>
-              )}
             </div>
           </div>
 
@@ -443,6 +423,115 @@ export function HomeClient() {
           <BarChart3 size={18} /> Detailed Analytics
         </Link>
       </div>
+
+      {isTopicPickerOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose topics"
+          onMouseDown={() => setIsTopicPickerOpen(false)}
+        >
+          <div
+            className="fixed inset-x-0 bottom-0 max-h-[85vh] bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 rounded-t-3xl shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                    Topics
+                  </p>
+                  <h3 className="mt-1 text-lg font-black text-gray-900 dark:text-white">
+                    Choose topics
+                  </h3>
+                  <p className="mt-1 text-xs font-bold text-gray-500 dark:text-gray-400">
+                    {selectedTags.length ? `${selectedTags.length} selected` : "No topic filter"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsTopicPickerOpen(false)}
+                  className="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                >
+                  Done
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                <div className="flex-1">
+                  <input
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.currentTarget.value)}
+                    placeholder="Search topics…"
+                    className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    aria-label="Search topics"
+                  />
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags([])}
+                    disabled={selectedTags.length === 0}
+                    className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                      selectedTags.length === 0
+                        ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
+                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    Clear
+                  </button>
+                  {availableTags.length > 0 && availableTags.length <= 60 ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTags(availableTags)}
+                      disabled={selectedTags.length === availableTags.length}
+                      className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                        selectedTags.length === availableTags.length
+                          ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-700 text-gray-400"
+                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      All
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto max-h-[calc(85vh-180px)]">
+              {availableTags.length > 0 ? (
+                filteredTags.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {filteredTags.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => toggleTag(tag)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                          selectedTags.includes(tag)
+                            ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400"
+                            : "bg-transparent border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        }`}
+                        aria-pressed={selectedTags.includes(tag)}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-400 italic">
+                    No topics match “{tagQuery.trim()}”.
+                  </span>
+                )
+              ) : (
+                <span className="text-xs text-gray-400 italic">
+                  No topics found for this selection.
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

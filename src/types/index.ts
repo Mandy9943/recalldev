@@ -116,6 +116,11 @@ export interface IDataRepository {
   // Progress
   getRecord(questionId: string): Promise<UserQuestionRecord | null>;
   saveEvaluation(questionId: string, evaluation: Evaluation): Promise<void>;
+  /**
+   * Directly set (overwrite) or remove a question record.
+   * Used for safe undo/re-grade flows where the latest session grade should not double-count.
+   */
+  setRecord(questionId: string, record: UserQuestionRecord | null): Promise<void>;
   
   // Stats
   getStats(): Promise<UserStats>;

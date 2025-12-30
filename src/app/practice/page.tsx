@@ -2,8 +2,18 @@
 
 import { useInterview } from "@/context/InterviewContext";
 import { buildPracticeSession, sessionSeedForToday } from "@/lib/session";
-import { formatIntervalDaysShort, formatNextReviewIn } from "@/lib/srs";
-import { Difficulty, Evaluation, ProgrammingLanguage, Question } from "@/types";
+import {
+  calculateNextReview,
+  formatIntervalDaysShort,
+  formatNextReviewIn,
+} from "@/lib/srs";
+import {
+  Difficulty,
+  Evaluation,
+  ProgrammingLanguage,
+  Question,
+  UserQuestionRecord,
+} from "@/types";
 import {
   AlertCircle,
   ArrowLeft,
@@ -17,7 +27,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -48,15 +65,30 @@ function PracticeContent() {
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isRevealed, setIsRevealed] = useState(false);
+  const [revealedById, setRevealedById] = useState<Record<string, boolean>>({});
+  const [evaluationById, setEvaluationById] = useState<
+    Record<string, Evaluation>
+  >({});
   const [sessionComplete, setSessionComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
-  const [makeup, setMakeup] = useState<{ due: number; new: number; extra: number } | null>(null);
+  const [makeup, setMakeup] = useState<{
+    due: number;
+    new: number;
+    extra: number;
+  } | null>(null);
   const [allCaughtUp, setAllCaughtUp] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSessionInfo, setShowSessionInfo] = useState(false);
   const [showAllTags, setShowAllTags] = useState(false);
+  const baselineRecordByIdRef = useRef<
+    Record<string, UserQuestionRecord | null | undefined>
+  >({});
+  const [lastUndo, setLastUndo] = useState<{
+    questionId: string;
+    prevRecord: UserQuestionRecord | null;
+    prevEvaluation?: Evaluation;
+  } | null>(null);
   const [reviewToast, setReviewToast] = useState<{
     title: string;
     detail?: string;
@@ -77,7 +109,10 @@ function PracticeContent() {
       setIsLoading(true);
       setSessionComplete(false);
       setCurrentIndex(0);
-      setIsRevealed(false);
+      setRevealedById({});
+      setEvaluationById({});
+      baselineRecordByIdRef.current = {};
+      setLastUndo(null);
 
       const seed = sessionSeedForToday({
         languages: lang ? [lang] : undefined,
@@ -98,7 +133,9 @@ function PracticeContent() {
       });
 
       const isCaughtUp =
-        mode === "due" ? base.makeup.due === 0 : base.makeup.due + base.makeup.new === 0;
+        mode === "due"
+          ? base.makeup.due === 0
+          : base.makeup.due + base.makeup.new === 0;
       setAllCaughtUp(isCaughtUp);
 
       if (isCaughtUp && !allowExtraPractice) {
@@ -111,7 +148,8 @@ function PracticeContent() {
       // If the user has *some* due/new, we can safely backfill with extras to keep the session usable.
       // But if they're fully caught up (no due/new), we require explicit opt-in via `extra=1`.
       const shouldBackfillExtras =
-        allowExtraPractice || (!isCaughtUp && base.questions.length < sessionSize);
+        allowExtraPractice ||
+        (!isCaughtUp && base.questions.length < sessionSize);
 
       const session = shouldBackfillExtras
         ? await buildPracticeSession({
@@ -132,18 +170,34 @@ function PracticeContent() {
     };
 
     loadSession();
-  }, [isReady, repository, lang, diff, tags, sessionSize, allowExtraPractice, mode]);
+  }, [
+    isReady,
+    repository,
+    lang,
+    diff,
+    tags,
+    sessionSize,
+    allowExtraPractice,
+    mode,
+  ]);
 
   const currentQuestion = questions[currentIndex];
+  const isRevealed = currentQuestion
+    ? Boolean(revealedById[currentQuestion.id])
+    : false;
+  const currentEvaluation = currentQuestion
+    ? evaluationById[currentQuestion.id]
+    : undefined;
 
   // Reset small UI toggles per question to reduce visual noise.
   useEffect(() => {
     setShowAllTags(false);
   }, [currentQuestion?.id]);
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
     if (!currentQuestion) return;
     if (questions.length <= 1) return;
+    setRevealedById((prev) => ({ ...prev, [currentQuestion.id]: false }));
     setQuestions((prev) => {
       const q = prev[currentIndex];
       if (!q) return prev;
@@ -153,46 +207,130 @@ function PracticeContent() {
       return next;
     });
     // Keep index stable; next question becomes whatever shifted into this slot.
-    setIsRevealed(false);
     window.scrollTo(0, 0);
     setReviewToast({ title: "Skipped (moved to end)" });
+  }, [currentQuestion, currentIndex, questions.length]);
+
+  const goPrev = () => {
+    if (currentIndex <= 0) return;
+    setCurrentIndex((prev) => Math.max(0, prev - 1));
+    window.scrollTo(0, 0);
   };
 
-  const handleEvaluation = async (evalType: Evaluation) => {
-    if (!currentQuestion) return;
+  const goNext = () => {
+    if (currentIndex >= questions.length - 1) return;
+    setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1));
+    window.scrollTo(0, 0);
+  };
+
+  const handleUndoLastGrade = useCallback(async () => {
+    if (!lastUndo) return;
     if (isSavingEvaluation) return;
 
     setIsSavingEvaluation(true);
     try {
-      await repository.saveEvaluation(currentQuestion.id, evalType);
-      const updated = await repository.getRecord(currentQuestion.id);
-      if (updated) {
-        const inText = formatNextReviewIn(updated.nextReviewDate);
-        const atText = new Date(updated.nextReviewDate).toLocaleString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        setReviewToast({
-          title: `Next review in ${inText}`,
-          detail: `Interval ${formatIntervalDaysShort(updated.interval)} • Streak ${updated.streak} • ${atText}`,
-        });
-      }
-
-      if (currentIndex < questions.length - 1) {
-        setCurrentIndex((prev) => prev + 1);
-        setIsRevealed(false);
-        window.scrollTo(0, 0);
-      } else {
-        await refreshStats();
-        setSessionComplete(true);
-      }
+      await repository.setRecord(lastUndo.questionId, lastUndo.prevRecord);
+      setEvaluationById((prev) => {
+        const next = { ...prev };
+        if (lastUndo.prevEvaluation)
+          next[lastUndo.questionId] = lastUndo.prevEvaluation;
+        else delete next[lastUndo.questionId];
+        return next;
+      });
+      setLastUndo(null);
+      setReviewToast({ title: "Undid last grade" });
     } finally {
       setIsSavingEvaluation(false);
     }
-  };
+  }, [isSavingEvaluation, lastUndo, repository]);
+
+  const handleEvaluation = useCallback(
+    async (evalType: Evaluation) => {
+      if (!currentQuestion) return;
+      if (isSavingEvaluation) return;
+
+      setIsSavingEvaluation(true);
+      try {
+        const questionId = currentQuestion.id;
+
+        // Capture baseline record once per question per session so re-grading doesn't double-count.
+        if (!(questionId in baselineRecordByIdRef.current)) {
+          baselineRecordByIdRef.current[questionId] =
+            await repository.getRecord(questionId);
+        }
+
+        const baseline = baselineRecordByIdRef.current[questionId] ?? null;
+        const baselineCopy: UserQuestionRecord | null = baseline
+          ? JSON.parse(JSON.stringify(baseline))
+          : null;
+
+        // Save undo snapshot (persisted record + previous session evaluation).
+        const prevPersisted = await repository.getRecord(questionId);
+        const prevEvaluation = evaluationById[questionId];
+        setLastUndo({
+          questionId,
+          prevRecord: prevPersisted,
+          prevEvaluation,
+        });
+
+        const nextRecord = calculateNextReview(
+          evalType,
+          baselineCopy,
+          questionId
+        );
+        await repository.setRecord(questionId, nextRecord);
+
+        const inText = formatNextReviewIn(nextRecord.nextReviewDate);
+        const atText = new Date(nextRecord.nextReviewDate).toLocaleString(
+          undefined,
+          {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          }
+        );
+        setReviewToast({
+          title: `Next review in ${inText}`,
+          detail: `Interval ${formatIntervalDaysShort(
+            nextRecord.interval
+          )} • Streak ${nextRecord.streak} • ${atText}`,
+        });
+
+        const alreadyGraded = Boolean(evaluationById[currentQuestion.id]);
+        const nextGradedCount =
+          Object.keys(evaluationById).length + (alreadyGraded ? 0 : 1);
+        setEvaluationById((prev) => ({
+          ...prev,
+          [currentQuestion.id]: evalType,
+        }));
+
+        // Complete once all questions have been graded at least once.
+        if (nextGradedCount >= questions.length) {
+          await refreshStats();
+          setSessionComplete(true);
+          return;
+        }
+
+        if (currentIndex < questions.length - 1) {
+          setCurrentIndex((prev) => prev + 1);
+          window.scrollTo(0, 0);
+        }
+      } finally {
+        setIsSavingEvaluation(false);
+      }
+    },
+    [
+      currentQuestion,
+      currentIndex,
+      evaluationById,
+      isSavingEvaluation,
+      questions.length,
+      refreshStats,
+      repository,
+    ]
+  );
 
   // Keyboard shortcuts (desktop): Space/Enter reveal, 1/2/3 grade, ? opens help, Esc closes help.
   useEffect(() => {
@@ -231,10 +369,18 @@ function PracticeContent() {
         return;
       }
 
+      if (e.key === "u" || e.key === "U") {
+        e.preventDefault();
+        handleUndoLastGrade();
+        return;
+      }
+
       if (!isRevealed) {
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault();
-          setIsRevealed(true);
+          setRevealedById((prev) =>
+            currentQuestion ? { ...prev, [currentQuestion.id]: true } : prev
+          );
         }
         return;
       }
@@ -263,6 +409,8 @@ function PracticeContent() {
     isRevealed,
     isSavingEvaluation,
     showShortcuts,
+    handleSkip,
+    handleUndoLastGrade,
     handleEvaluation,
   ]);
 
@@ -471,7 +619,10 @@ function PracticeContent() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              {(showAllTags ? currentQuestion.tags : currentQuestion.tags.slice(0, 3)).map((tag) => (
+              {(showAllTags
+                ? currentQuestion.tags
+                : currentQuestion.tags.slice(0, 3)
+              ).map((tag) => (
                 <span
                   key={tag}
                   className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md"
@@ -484,9 +635,15 @@ function PracticeContent() {
                   type="button"
                   onClick={() => setShowAllTags((v) => !v)}
                   className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-2 py-1 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                  aria-label={showAllTags ? "Collapse tags" : `Show ${currentQuestion.tags.length - 3} more tags`}
+                  aria-label={
+                    showAllTags
+                      ? "Collapse tags"
+                      : `Show ${currentQuestion.tags.length - 3} more tags`
+                  }
                 >
-                  {showAllTags ? "Less" : `+${currentQuestion.tags.length - 3} more`}
+                  {showAllTags
+                    ? "Less"
+                    : `+${currentQuestion.tags.length - 3} more`}
                 </button>
               ) : null}
             </div>
@@ -629,27 +786,40 @@ function PracticeContent() {
 
             <div className="mt-5 space-y-3 text-sm text-gray-700 dark:text-gray-200">
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400 font-bold">Mode</span>
-                <span className="font-black">{mode === "due" ? "Due only" : "Due + new"}</span>
+                <span className="text-gray-500 dark:text-gray-400 font-bold">
+                  Mode
+                </span>
+                <span className="font-black">
+                  {mode === "due" ? "Due only" : "Due + new"}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400 font-bold">Length</span>
+                <span className="text-gray-500 dark:text-gray-400 font-bold">
+                  Length
+                </span>
                 <span className="font-black">{sessionSize} questions</span>
               </div>
               {makeup ? (
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 dark:text-gray-400 font-bold">Pool</span>
+                  <span className="text-gray-500 dark:text-gray-400 font-bold">
+                    Pool
+                  </span>
                   <span className="font-black">
-                    {makeup.due} due • {makeup.new} new{makeup.extra ? ` • ${makeup.extra} extra` : ""}
+                    {makeup.due} due • {makeup.new} new
+                    {makeup.extra ? ` • ${makeup.extra} extra` : ""}
                   </span>
                 </div>
               ) : null}
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400 font-bold">Extra practice</span>
-                <span className="font-black">{allowExtraPractice ? "On" : "Off"}</span>
+                <span className="text-gray-500 dark:text-gray-400 font-bold">
+                  Extra practice
+                </span>
+                <span className="font-black">
+                  {allowExtraPractice ? "On" : "Off"}
+                </span>
               </div>
 
-              {(lang || diff || (tags?.length ?? 0) > 0) ? (
+              {lang || diff || (tags?.length ?? 0) > 0 ? (
                 <div className="pt-3 mt-3 border-t border-gray-200 dark:border-gray-800 space-y-2">
                   <p className="text-xs font-black text-gray-400 uppercase tracking-widest">
                     Filters
@@ -733,6 +903,13 @@ function PracticeContent() {
               </div>
 
               <div className="flex items-center justify-between gap-4">
+                <span>Undo last grade</span>
+                <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
+                  U
+                </kbd>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
                 <span>Grade: Fail</span>
                 <kbd className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 font-mono text-xs">
                   1
@@ -765,8 +942,8 @@ function PracticeContent() {
             </div>
 
             <p className="mt-5 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-              Tip: shortcuts work best on desktop. On mobile, the buttons are the
-              fastest path.
+              Tip: shortcuts work best on desktop. On mobile, the buttons are
+              the fastest path.
             </p>
           </div>
         </div>
@@ -774,10 +951,64 @@ function PracticeContent() {
 
       <div className="fixed bottom-0 left-0 right-0 p-4 md:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 z-20 shadow-lg">
         <div className="max-w-3xl mx-auto">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={currentIndex <= 0}
+              className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                currentIndex <= 0
+                  ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-800 text-gray-400"
+                  : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+              aria-label="Previous question"
+            >
+              Prev
+            </button>
+            <div className="text-center">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                {currentEvaluation
+                  ? `Graded: ${currentEvaluation.replace("_", " ")}`
+                  : "Not graded yet"}
+              </p>
+              <button
+                type="button"
+                onClick={handleUndoLastGrade}
+                disabled={!lastUndo || isSavingEvaluation}
+                className={`mt-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${
+                  !lastUndo || isSavingEvaluation
+                    ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-800 text-gray-400"
+                    : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                }`}
+                aria-label="Undo last grade"
+              >
+                Undo last grade
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={currentIndex >= questions.length - 1}
+              className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border transition-all ${
+                currentIndex >= questions.length - 1
+                  ? "opacity-50 pointer-events-none bg-transparent border-gray-200 dark:border-gray-800 text-gray-400"
+                  : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              }`}
+              aria-label="Next question"
+            >
+              Next
+            </button>
+          </div>
           {!isRevealed ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
-                onClick={() => setIsRevealed(true)}
+                onClick={() =>
+                  setRevealedById((prev) =>
+                    currentQuestion
+                      ? { ...prev, [currentQuestion.id]: true }
+                      : prev
+                  )
+                }
                 className="sm:col-span-2 w-full bg-blue-600 hover:bg-blue-700 text-white py-5 rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none transition-all active:scale-[0.98] text-xl flex items-center justify-center gap-3"
                 aria-label="Show the answer"
               >
@@ -809,7 +1040,9 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("bad")}
                   disabled={isSavingEvaluation}
-                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all ${
+                    isSavingEvaluation ? "opacity-60 pointer-events-none" : ""
+                  }`}
                   aria-label="Mark as fail"
                 >
                   <span className="text-3xl mb-1">👎</span>
@@ -824,7 +1057,9 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("kind_of")}
                   disabled={isSavingEvaluation}
-                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-yellow-100 dark:border-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-yellow-100 dark:border-yellow-900/30 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all ${
+                    isSavingEvaluation ? "opacity-60 pointer-events-none" : ""
+                  }`}
                   aria-label="Mark as kind of"
                 >
                   <span className="text-3xl mb-1">🤔</span>
@@ -839,7 +1074,9 @@ function PracticeContent() {
                 <button
                   onClick={() => handleEvaluation("good")}
                   disabled={isSavingEvaluation}
-                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-green-100 dark:border-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all ${isSavingEvaluation ? "opacity-60 pointer-events-none" : ""}`}
+                  className={`flex flex-col items-center justify-center p-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-green-100 dark:border-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all ${
+                    isSavingEvaluation ? "opacity-60 pointer-events-none" : ""
+                  }`}
                   aria-label="Mark as mastered"
                 >
                   <span className="text-3xl mb-1">👍</span>
